@@ -1056,7 +1056,7 @@ void AP_InertialSensor_MPU9150::_accumulate(void){
     }    
 
     // read the samples
-    for (uint16_t i=0; i< fifo_count; i++) {        
+    for (uint16_t i=0; i< (fifo_count/packet_size); i++) {        
         // read the data
         // TODO check whether it's possible to read all the packages in a single call
         hal.i2c->readRegisters(st.hw->addr, st.reg->fifo_r_w, packet_size, data);
@@ -1151,7 +1151,7 @@ bool AP_InertialSensor_MPU9150::update(void)
 
     // Adjust for chip scaling to get m/s/s
     ////////////////////////////////////////////////
-    _accel[0] *= MPU9150_ACCEL_SCALE_2G/_gyro_samples_available;
+    _accel[0] *= MPU9150_ACCEL_SCALE_2G;
 
     // Now the calibration scale factor
     _accel[0].x *= accel_scale.x;
@@ -1162,7 +1162,7 @@ bool AP_InertialSensor_MPU9150::update(void)
     _gyro[0].rotate(_board_orientation);
 
     // Adjust for chip scaling to get radians/sec
-    _gyro[0] *= MPU9150_GYRO_SCALE_2000 / _gyro_samples_available;
+    _gyro[0] *= MPU9150_GYRO_SCALE_2000;
     _gyro[0] -= _gyro_offset[0];
     ////////////////////////////////////////////////
 
