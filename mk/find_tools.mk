@@ -73,6 +73,15 @@ RPI_LD      :=  arm-linux-gnueabihf-g++
 RPI_GDB     :=  arm-linux-gnueabihf-gdb
 RPI_OBJCOPY :=  arm-linux-gnueabihf-obj
 
+# toolchains for Trace
+TRACE_CXX     :=  arm-arago-linux-gnueabi-g++
+TRACE_CC      :=  arm-arago-linux-gnueabi-gcc
+TRACE_AS      :=  arm-arago-linux-gnueabi-gcc
+TRACE_AR      :=  arm-arago-linux-gnueabi-ar
+TRACE_LD      :=  arm-arago-linux-gnueabi-g++
+TRACE_GDB     :=  arm-arago-linux-gnueabi-gdb
+TRACE_OBJCOPY :=  arm-arago-linux-gnueabi-obj
+
 # enable ccache if installed
 CCACHE :=  $(call FIND_TOOL,ccache)
 

@@ -24,6 +24,10 @@ extern const AP_HAL::HAL& hal;
 #define APM_LINUX_MAIN_PRIORITY     11
 #define APM_LINUX_IO_PRIORITY       10
 
+
+// Default stack size (1MB), required on low memory boards to prevent VM overcommit
+#define APM_LINUX_STACK_SIZE        (1024*1024)
+
 LinuxScheduler::LinuxScheduler()
 {}
 
@@ -58,6 +62,7 @@ void LinuxScheduler::init(void* machtnichts)
     pthread_attr_init(&thread_attr);
     (void)pthread_attr_setschedparam(&thread_attr, &param);
     pthread_attr_setschedpolicy(&thread_attr, SCHED_FIFO);
+    pthread_attr_setstacksize(&thread_attr, APM_LINUX_STACK_SIZE);
 
     pthread_create(&_timer_thread_ctx, &thread_attr, (pthread_startroutine_t)&Linux::LinuxScheduler::_timer_thread, this);
 
@@ -66,6 +71,7 @@ void LinuxScheduler::init(void* machtnichts)
     param.sched_priority = APM_LINUX_UART_PRIORITY;
     (void)pthread_attr_setschedparam(&thread_attr, &param);
     pthread_attr_setschedpolicy(&thread_attr, SCHED_FIFO);
+    pthread_attr_setstacksize(&thread_attr, APM_LINUX_STACK_SIZE);
 
     pthread_create(&_uart_thread_ctx, &thread_attr, (pthread_startroutine_t)&Linux::LinuxScheduler::_uart_thread, this);
 
@@ -74,6 +80,7 @@ void LinuxScheduler::init(void* machtnichts)
     param.sched_priority = APM_LINUX_RCIN_PRIORITY;
     (void)pthread_attr_setschedparam(&thread_attr, &param);
     pthread_attr_setschedpolicy(&thread_attr, SCHED_FIFO);
+    pthread_attr_setstacksize(&thread_attr, APM_LINUX_STACK_SIZE);
 
     pthread_create(&_rcin_thread_ctx, &thread_attr, (pthread_startroutine_t)&Linux::LinuxScheduler::_rcin_thread, this);
   
@@ -82,6 +89,7 @@ void LinuxScheduler::init(void* machtnichts)
     param.sched_priority = APM_LINUX_IO_PRIORITY;
     (void)pthread_attr_setschedparam(&thread_attr, &param);
     pthread_attr_setschedpolicy(&thread_attr, SCHED_FIFO);
+    pthread_attr_setstacksize(&thread_attr, APM_LINUX_STACK_SIZE);
     
     pthread_create(&_io_thread_ctx, &thread_attr, (pthread_startroutine_t)&Linux::LinuxScheduler::_io_thread, this);
 }
