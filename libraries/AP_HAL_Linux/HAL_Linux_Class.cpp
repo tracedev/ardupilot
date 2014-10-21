@@ -20,7 +20,11 @@ static LinuxUARTDriver uartBDriver(false);
 static LinuxUARTDriver uartCDriver(false);
 
 static LinuxSemaphore  i2cSemaphore;
+#if CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_TRACE
+static LinuxI2CDriver  i2cDriver(&i2cSemaphore, "/dev/i2c-4");
+#else
 static LinuxI2CDriver  i2cDriver(&i2cSemaphore, "/dev/i2c-1");
+#endif
 static LinuxSPIDeviceManager spiDeviceManager;
 static LinuxAnalogIn analogIn;
 static LinuxStorage storageDriver;
