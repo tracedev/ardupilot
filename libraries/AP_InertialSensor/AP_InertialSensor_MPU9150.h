@@ -11,6 +11,8 @@
 #include <Filter.h>
 #include <LowPassFilter2p.h>
 
+//#define FULL_FIFO_READS
+#define MAX_FIFO_SIZE (1024)
 
 class AP_InertialSensor_MPU9150 : public AP_InertialSensor
 {
@@ -66,6 +68,9 @@ private:
     // LowPassFilter2p _mag_filter_y;
     // LowPassFilter2p _mag_filter_z;
 
+    #ifdef FULL_FIFO_READS
+    uint8_t fifo_buffer[MAX_FIFO_SIZE];
+    #endif
 
 };
 #endif

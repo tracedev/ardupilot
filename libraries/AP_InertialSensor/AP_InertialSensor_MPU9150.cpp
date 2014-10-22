@@ -957,7 +957,7 @@ int16_t AP_InertialSensor_MPU9150::mpu_read_fifo(int16_t *gyro, int16_t *accel, 
 {
     /* Assumes maximum packet size is gyro (6) + accel (6). */
     uint8_t data[12];
-    uint8_t packet_size = 0;
+    uint16_t packet_size = 0;
     uint16_t fifo_count, index = 0;
     uint8_t sensors_aux = INV_XYZ_ACCEL| INV_XYZ_GYRO;
 
@@ -1055,10 +1055,10 @@ void AP_InertialSensor_MPU9150::_accumulate(void){
         }
     }    
 
-    // read the samples
+    #ifndef FULL_FIFO_READS
+    // read the samples from the FIFO one at a time
     for (uint16_t i=0; i< (fifo_count/packet_size); i++) {        
-        // read the data
-        // TODO check whether it's possible to read all the packages in a single call
+        // obtain an entry
         hal.i2c->readRegisters(st.hw->addr, st.reg->fifo_r_w, packet_size, data);
         // TODO, remove all the checking since it's being configured this way.
         if (index != packet_size) {
@@ -1082,8 +1082,6 @@ void AP_InertialSensor_MPU9150::_accumulate(void){
         // reset the index
         index = 0;
 
-        // TODO Revisit why AP_InertialSensor_L3G4200D uses a minus sign in the y and z component. Maybe this
-        //  is because the sensor is placed in the bottom side of the board?
         _accel_filtered = Vector3f(
             _accel_filter_x.apply(accel_x), 
             _accel_filter_y.apply(accel_y), 
@@ -1099,6 +1097,44 @@ void AP_InertialSensor_MPU9150::_accumulate(void){
 
     // give back i2c semaphore
     i2c_sem->give();
+    #else
+    // Read all the samples from the FIFO at once
+    // BUGBUG this results in sporadically glitchy data
+    if (hal.i2c->readRegisters(st.hw->addr, st.reg->fifo_r_w, fifo_count, fifo_buffer)) {
+        // Unable to read
+        printf("Unable to read\n");
+        i2c_sem->give();
+        return;
+    }
+
+    // give back i2c semaphore
+    i2c_sem->give();
+
+    for (uint16_t i=0; i< (fifo_count/packet_size); i++) {        
+
+        index = i*packet_size;
+
+        accel_x = (int16_t) (fifo_buffer[index] << 8) | fifo_buffer[index+1];
+        accel_y = (int16_t) (fifo_buffer[index+2] << 8) | fifo_buffer[index+3];
+        accel_z = (int16_t) (fifo_buffer[index+4] << 8) | fifo_buffer[index+5];
+
+        gyro_x = (int16_t) (fifo_buffer[index+6] << 8) | fifo_buffer[index+7];
+        gyro_y = (int16_t) (fifo_buffer[index+8] << 8) | fifo_buffer[index+9];
+        gyro_z = (int16_t) (fifo_buffer[index+10] << 8) | fifo_buffer[index+11];
+
+        _accel_filtered = Vector3f(
+            _accel_filter_x.apply(accel_x), 
+            _accel_filter_y.apply(accel_y), 
+            _accel_filter_z.apply(accel_z));
+
+        _gyro_filtered = Vector3f(
+            _gyro_filter_x.apply(gyro_x), 
+            _gyro_filter_y.apply(gyro_y), 
+            _gyro_filter_z.apply(gyro_z));
+
+        _gyro_samples_available++;
+    }
+    #endif
 }
 
 bool AP_InertialSensor_MPU9150::_sample_available(void)
