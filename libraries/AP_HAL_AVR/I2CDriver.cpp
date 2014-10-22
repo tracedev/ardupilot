@@ -98,12 +98,12 @@ void AVRI2CDriver::setHighSpeed(bool active) {
     }
 }
 
-uint8_t AVRI2CDriver::write(uint8_t addr, uint8_t len, uint8_t* data){
+uint8_t AVRI2CDriver::write(uint8_t addr, uint16_t len, uint8_t* data){
     uint8_t stat = _start();
     if (stat) goto error;
     stat = _sendAddress(SLA_W(addr));
     if (stat) goto error;
-    for (uint8_t i = 0; i < len; i++)
+    for (uint16_t i = 0; i < len; i++)
     {
         stat = _sendByte(data[i]);
         if (stat) goto error;
@@ -117,14 +117,14 @@ error:
 }
 
 uint8_t AVRI2CDriver::writeRegisters(uint8_t addr, uint8_t reg,
-                                    uint8_t len, uint8_t* data){
+                                    uint16_t len, uint8_t* data){
     uint8_t stat = _start();
     if (stat) goto error;
     stat = _sendAddress(SLA_W(addr));
     if (stat) goto error;
     stat = _sendByte(reg);
     if (stat) goto error;
-    for (uint8_t i = 0; i < len; i++)
+    for (uint16_t i = 0; i < len; i++)
     {
         stat = _sendByte(data[i]);
         if (stat) goto error;
@@ -146,7 +146,7 @@ uint8_t AVRI2CDriver::writeRegister(uint8_t addr, uint8_t reg, uint8_t val) {
         return writeRegisters(addr, reg, 1, data);
 }
 
-uint8_t AVRI2CDriver::read(uint8_t addr, uint8_t len, uint8_t* data){
+uint8_t AVRI2CDriver::read(uint8_t addr, uint16_t len, uint8_t* data){
     uint8_t stat;
     if ( len == 0)
         len = 1;
@@ -156,7 +156,7 @@ uint8_t AVRI2CDriver::read(uint8_t addr, uint8_t len, uint8_t* data){
     if(stat) goto error;
     stat = _sendAddress(SLA_R(addr));
     if(stat) goto error;
-    for(uint8_t i = 0; i < len ; i++) {
+    for(uint16_t i = 0; i < len ; i++) {
         if ( i == nackposition ) {
             stat = _receiveByte(false);
             if (stat != MR_DATA_NACK) goto error;
@@ -175,7 +175,7 @@ error:
 }
 
 uint8_t AVRI2CDriver::readRegisters(uint8_t addr, uint8_t reg,
-                                    uint8_t len, uint8_t* data){
+                                    uint16_t len, uint8_t* data){
     uint8_t stat;
     if ( len == 0)
         len = 1;
@@ -191,7 +191,7 @@ uint8_t AVRI2CDriver::readRegisters(uint8_t addr, uint8_t reg,
     if(stat) goto error;
     stat = _sendAddress(SLA_R(addr));
     if(stat) goto error;
-    for(uint8_t i = 0; i < len ; i++) {
+    for(uint16_t i = 0; i < len ; i++) {
         if ( i == nackposition ) {
             stat = _receiveByte(false);
             if (stat != MR_DATA_NACK) goto error;

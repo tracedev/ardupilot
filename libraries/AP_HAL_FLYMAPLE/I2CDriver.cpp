@@ -53,7 +53,7 @@ void FLYMAPLEI2CDriver::setTimeout(uint16_t ms)
 
 void FLYMAPLEI2CDriver::setHighSpeed(bool active) {}
 
-uint8_t FLYMAPLEI2CDriver::write(uint8_t addr, uint8_t len, uint8_t* data)
+uint8_t FLYMAPLEI2CDriver::write(uint8_t addr, uint16_t len, uint8_t* data)
 {
     i2c_msg msgs[1];
     msgs[0].addr = addr;
@@ -69,7 +69,7 @@ uint8_t FLYMAPLEI2CDriver::writeRegister(uint8_t addr, uint8_t reg, uint8_t val)
 }
 
 uint8_t FLYMAPLEI2CDriver::writeRegisters(uint8_t addr, uint8_t reg,
-                               uint8_t len, uint8_t* data)
+                               uint16_t len, uint8_t* data)
 {
     uint8_t buffer[100];
     buffer[0] = reg;
@@ -83,7 +83,7 @@ uint8_t FLYMAPLEI2CDriver::writeRegisters(uint8_t addr, uint8_t reg,
     return _transfer(msgs, 1);
 }
 
-uint8_t FLYMAPLEI2CDriver::read(uint8_t addr, uint8_t len, uint8_t* data)
+uint8_t FLYMAPLEI2CDriver::read(uint8_t addr, uint16_t len, uint8_t* data)
 {
     // For devices that do not honour normal register conventions (not on flymaple?)
     // Now read it
@@ -101,7 +101,7 @@ uint8_t FLYMAPLEI2CDriver::readRegister(uint8_t addr, uint8_t reg, uint8_t* data
 }
 
 uint8_t FLYMAPLEI2CDriver::readRegisters(uint8_t addr, uint8_t reg,
-                              uint8_t len, uint8_t* data)
+                              uint16_t len, uint8_t* data)
 {
     // We conduct a write of the register number we want followed by a read
     data[0] = reg; // Temporarily steal this for the write

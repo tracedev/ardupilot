@@ -71,7 +71,7 @@ void LinuxI2CDriver::setHighSpeed(bool active)
     // unimplemented    
 }
 
-uint8_t LinuxI2CDriver::write(uint8_t addr, uint8_t len, uint8_t* data)
+uint8_t LinuxI2CDriver::write(uint8_t addr, uint16_t len, uint8_t* data)
 {
     if (!set_address(addr)) {
         return 1;
@@ -84,7 +84,7 @@ uint8_t LinuxI2CDriver::write(uint8_t addr, uint8_t len, uint8_t* data)
 
 
 uint8_t LinuxI2CDriver::writeRegisters(uint8_t addr, uint8_t reg,
-                                       uint8_t len, uint8_t* data)
+                                       uint16_t len, uint8_t* data)
 {
     uint8_t buf[len+1];
     buf[0] = reg;
@@ -123,7 +123,7 @@ uint8_t LinuxI2CDriver::writeRegister(uint8_t addr, uint8_t reg, uint8_t val)
     return 0;
 }
 
-uint8_t LinuxI2CDriver::read(uint8_t addr, uint8_t len, uint8_t* data)
+uint8_t LinuxI2CDriver::read(uint8_t addr, uint16_t len, uint8_t* data)
 {
     if (!set_address(addr)) {
         return 1;
@@ -135,7 +135,7 @@ uint8_t LinuxI2CDriver::read(uint8_t addr, uint8_t len, uint8_t* data)
 }
 
 uint8_t LinuxI2CDriver::readRegisters(uint8_t addr, uint8_t reg,
-                                      uint8_t len, uint8_t* data)
+                                      uint16_t len, uint8_t* data)
 {
     if (_fd == -1) {
         return 1;
@@ -171,7 +171,7 @@ uint8_t LinuxI2CDriver::readRegisters(uint8_t addr, uint8_t reg,
 
 
 uint8_t LinuxI2CDriver::readRegistersMultiple(uint8_t addr, uint8_t reg,
-                                              uint8_t len, 
+                                              uint16_t len, 
                                               uint8_t count, uint8_t* data)
 {
     if (_fd == -1) {
