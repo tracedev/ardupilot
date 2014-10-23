@@ -278,6 +278,8 @@ static AP_Compass_PX4 compass;
 static AP_Compass_VRBRAIN compass;
 #elif CONFIG_COMPASS == HAL_COMPASS_HMC5843
 static AP_Compass_HMC5843 compass;
+#elif CONFIG_COMPASS == HAL_COMPASS_MPU9150
+AP_InertialSensor_MPU9150 compass;
 #elif CONFIG_COMPASS == HAL_COMPASS_HIL
 static AP_Compass_HIL compass;
 #else
