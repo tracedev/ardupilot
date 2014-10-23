@@ -701,7 +701,7 @@ int16_t AP_InertialSensor_MPU9150::mpu_configure_fifo(uint8_t sensors)
     int16_t result = 0;
 
     /* Compass data isn't going into the FIFO. Stop trying. */
-    sensors &= ~INV_XYZ_COMPASS;
+    //sensors &= ~INV_XYZ_COMPASS;
 
     // Enable or disable the interrupts
     // set_int_enable(1);
@@ -752,8 +752,14 @@ int16_t AP_InertialSensor_MPU9150::mpu_reset_fifo()
     data = BIT_FIFO_RST;
     hal.i2c->writeRegister(st.hw->addr,st.reg->user_ctrl, data);
 
-    data = BIT_FIFO_EN;
-    // data = BIT_FIFO_EN | BIT_AUX_IF_EN;
+    if (_bypass_mode || !(_sensors & INV_XYZ_COMPASS)) {
+        data = BIT_FIFO_EN; 
+    } else {
+        // Enable I2C master for aux bus if compass in use
+        printf("Enabling I2C master for aux bus\n");
+        data = BIT_FIFO_EN | BIT_AUX_IF_EN;
+    }
+        
     hal.i2c->writeRegister(st.hw->addr,st.reg->user_ctrl, data);
     hal.scheduler->delay(50);
 
