@@ -787,6 +787,8 @@ int16_t AP_InertialSensor_MPU9150::setup_compass(void)
         /* TODO: Handle this case in all compass-related functions. */
         hal.scheduler->panic(PSTR("AP_InertialSensor_MPU9150: Compass not found.\n"));
         return -1;
+    } else {
+        printf("Found compass at 0x%02x\n", akm_addr);
     }
 
     _compass_addr = akm_addr;
@@ -958,7 +960,6 @@ int16_t AP_InertialSensor_MPU9150::mpu_set_bypass(uint8_t bypass_on)
             return -1;
         hal.scheduler->delay(3);
         tmp = BIT_BYPASS_EN;
-        tmp |= BIT_ACTL;
         #if 0
         if (st.chip_cfg.active_low_int)
             tmp |= BIT_ACTL;
@@ -986,7 +987,6 @@ int16_t AP_InertialSensor_MPU9150::mpu_set_bypass(uint8_t bypass_on)
         if (st.chip_cfg.latched_int)
             tmp |= BIT_LATCH_EN | BIT_ANY_RD_CLR;
         #endif
-        tmp = BIT_ACTL;
         if (hal.i2c->writeRegister(st.hw->addr, st.reg->int_pin_cfg, tmp))
             return -1;
     }
