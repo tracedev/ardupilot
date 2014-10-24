@@ -363,12 +363,14 @@ AP_InertialSensor_MPU9150::AP_InertialSensor_MPU9150() :
     _gyro_filter_x(800, 10),
     _gyro_filter_y(800, 10),
     _gyro_filter_z(800, 10),    
-    _mag_filter_x(800, 10),    
-    _mag_filter_y(800, 10),    
-    _mag_filter_z(800, 10),
+    //_mag_filter_x(800, 10),    
+    //_mag_filter_y(800, 10),    
+    //_mag_filter_z(800, 10),
     _chip_sample_rate(0),
     _compass_addr(0),
-    _compass_sample_rate(0)
+    _compass_sample_rate(0),
+    _initialized(false),
+    _mpu9150_product_id(AP_PRODUCT_ID_TRACE)
 
 {
 
@@ -393,10 +395,14 @@ void AP_InertialSensor_MPU9150::_set_filter_frequency(uint8_t filter_hz)
 /**
  *  @brief      Init method
  *  @param[in] Sample_rate  The sample rate, check the struct def.
- *  @return     AP_PRODUCT_ID_PIXHAWK_FIRE_CAPE if successful.
+ *  @return     AP_PRODUCT_ID_TRACE if successful.
  */
 uint16_t AP_InertialSensor_MPU9150::_init_sensor( Sample_rate sample_rate ) 
 {
+
+    if (_initialized) return _mpu9150_product_id;
+    _initialized = true;
+
     // Sensors pushed to the FIFO.
     uint8_t sensors;
 
@@ -421,10 +427,10 @@ uint16_t AP_InertialSensor_MPU9150::_init_sensor( Sample_rate sample_rate )
     }
 
     // get pointer to i2c bus semaphore
-    AP_HAL::Semaphore* i2c_sem = hal.i2c->get_semaphore();
+    _i2c_sem = hal.i2c->get_semaphore();
 
     // take i2c bus sempahore
-    if (!i2c_sem->take(HAL_SEMAPHORE_BLOCK_FOREVER)){
+    if (!_i2c_sem->take(HAL_SEMAPHORE_BLOCK_FOREVER)){
         return -1;
     }        
 
@@ -499,7 +505,7 @@ uint16_t AP_InertialSensor_MPU9150::_init_sensor( Sample_rate sample_rate )
     }
 
     setup_compass();
-    if (mpu_set_compass_sample_rate(10)) {
+    if (mpu_set_compass_sample_rate(100)) {
         hal.scheduler->panic(PSTR("AP_InertialSensor_MPU9150: mpu_set_compass_sample_Rate.\n"));
         goto failed;    
     }
@@ -510,14 +516,14 @@ uint16_t AP_InertialSensor_MPU9150::_init_sensor( Sample_rate sample_rate )
     _set_filter_frequency(_mpu6000_filter);
 
     // give back i2c semaphore
-    i2c_sem->give();
+    _i2c_sem->give();
     // start the timer process to read samples    
     hal.scheduler->register_timer_process(AP_HAL_MEMBERPROC(&AP_InertialSensor_MPU9150::_accumulate));
     return AP_PRODUCT_ID_PIXHAWK_FIRE_CAPE;
 
     failed:
         // give back i2c semaphore
-        i2c_sem->give();
+        _i2c_sem->give();
         return -1;
 }
 
@@ -701,7 +707,7 @@ int16_t AP_InertialSensor_MPU9150::mpu_configure_fifo(uint8_t sensors)
     int16_t result = 0;
 
     /* Compass data isn't going into the FIFO. Stop trying. */
-    //sensors &= ~INV_XYZ_COMPASS;
+    sensors &= ~INV_XYZ_COMPASS;
 
     // Enable or disable the interrupts
     // set_int_enable(1);
@@ -863,7 +869,7 @@ int16_t AP_InertialSensor_MPU9150::setup_compass(void)
     if (hal.i2c->writeRegister(st.hw->addr, st.reg->s1_do, data[0]))
         return -1;
 
-    /* Trigger slave 0 and slave 1 actions at each sample. */
+    /* Trigger slave 0 and slave 1 actions at a decreased rate (based on i2c_mst_dly. */
     data[0] = 0x03;
     if (hal.i2c->writeRegister(st.hw->addr, st.reg->i2c_delay_ctrl, data[0]))
         return -1;
@@ -874,6 +880,69 @@ int16_t AP_InertialSensor_MPU9150::setup_compass(void)
         return -1;
 
     return 0;
+}
+
+/**
+ *  @brief      Read raw compass data from I2C slave external
+ *              sensor register.
+ *  @param[out] data        Raw data in hardware units.
+ *  @return     0 if successful.
+ */
+int16_t AP_InertialSensor_MPU9150::mpu_get_compass_reg(int16_t *data)
+{
+    uint8_t tmp[9];
+
+    if (!(_sensors & INV_XYZ_COMPASS))
+        return -1;
+
+    if (hal.i2c->readRegisters(st.hw->addr, st.reg->raw_compass, 8, tmp))
+        return -1;
+
+    /* AK8975 doesn't have the overrun error bit. */
+    if (!(tmp[0] & AKM_DATA_READY))
+        return -2;
+    if ((tmp[7] & AKM_OVERFLOW) || (tmp[7] & AKM_DATA_ERROR))
+        return -3;
+
+    data[0] = (tmp[2] << 8) | tmp[1];
+    data[1] = (tmp[4] << 8) | tmp[3];
+    data[2] = (tmp[6] << 8) | tmp[5];
+
+    data[0] = ((long)data[0] * _mag_sens_adj[0]) >> 8;
+    data[1] = ((long)data[1] * _mag_sens_adj[1]) >> 8;
+    data[2] = ((long)data[2] * _mag_sens_adj[2]) >> 8;
+
+    return 0;
+}
+
+/**
+ *  @brief      Take the bus and read compass results
+ *  @param[out] mag_data        Magnetometer data
+ *  @return     0 if successful.
+ */
+int16_t AP_InertialSensor_MPU9150::read_compass(Vector3f &mag_data)
+{
+
+    int16_t data[3];
+    int16_t ret;
+
+    if (!_initialized) {
+        return 1;
+    }
+
+    // take i2c bus sempahore
+    if (!_i2c_sem->take_nonblocking()){
+        return 2;
+    }
+
+    ret = mpu_get_compass_reg(data);
+    if (0 == ret) {
+        mag_data = Vector3f(data[0], data[1], data[2]);
+    }
+
+    _i2c_sem->give();
+    return ret;
+
 }
 
 /**
@@ -1123,27 +1192,26 @@ int16_t AP_InertialSensor_MPU9150::mpu_read_fifo(int16_t *gyro, int16_t *accel, 
  *
  */
 void AP_InertialSensor_MPU9150::_accumulate(void){
-    // get pointer to i2c bus semaphore
-    AP_HAL::Semaphore* i2c_sem = hal.i2c->get_semaphore();
 
     // take i2c bus sempahore
-    if (!i2c_sem->take_nonblocking()){
+    if (!_i2c_sem->take_nonblocking()){
         return;
     }
 
     // Read MPU9150 FIFO to find out how many samples are available
-    /* Assumes maximum packet size is gyro (6) + accel (6) + compass (8). */
-    uint8_t data[20];
-    uint8_t packet_size = 20;
+    /* Assumes maximum packet size is gyro (6) + accel (6) */
+    uint8_t data[12];
+    uint8_t packet_size = 12;
     uint16_t fifo_count, index = 0;
-    int16_t accel_x, accel_y, accel_z, gyro_x, gyro_y, gyro_z, mag_x, mag_y, mag_z;
+    int16_t accel_x, accel_y, accel_z, gyro_x, gyro_y, gyro_z;
+    //int16_t mag_x, mag_y, mag_z;
 
-    // fifo_count_h register contains the number of samples in the FIFO
+    // fifo_count_h register contains the number of bytes in the FIFO
     hal.i2c->readRegisters(st.hw->addr, st.reg->fifo_count_h, 2, data);
     fifo_count = (data[0] << 8) | data[1];
     if (fifo_count < packet_size){
         // give back i2c semaphore
-        i2c_sem->give();
+        _i2c_sem->give();
         return;
     }
 
@@ -1153,7 +1221,7 @@ void AP_InertialSensor_MPU9150::_accumulate(void){
         hal.i2c->readRegister(st.hw->addr, st.reg->int_status, data);
         if (data[0] & BIT_FIFO_OVERFLOW) {            
             mpu_reset_fifo();
-            i2c_sem->give();
+            _i2c_sem->give();
             return;
         }
     }    
@@ -1181,7 +1249,9 @@ void AP_InertialSensor_MPU9150::_accumulate(void){
         if (index != packet_size) {
             gyro_z = (int16_t) (data[index+0] << 8) | data[index+1];
             index += 2;
-        }        
+        }
+
+        #if 0
         if (index != packet_size) {
             // Mag data is ST1, HXL, HXH, HYL, HYH, HZL, HZH, ST2
             mag_x = (int16_t) (data[index+1] << 8) | data[index+2];
@@ -1189,6 +1259,7 @@ void AP_InertialSensor_MPU9150::_accumulate(void){
             mag_z = (int16_t) (data[index+5] << 8) | data[index+6];
             index += 8;
         }
+        #endif
         // reset the index
         index = 0;
 
@@ -1202,29 +1273,32 @@ void AP_InertialSensor_MPU9150::_accumulate(void){
             _gyro_filter_y.apply(gyro_y), 
             _gyro_filter_z.apply(gyro_z));
 
+        #if 0
         _mag_filtered = Vector3f(
             _mag_filter_x.apply(mag_x), 
             _mag_filter_y.apply(mag_y), 
             _mag_filter_z.apply(mag_z));
 
         printf("compass: x=%d, y=%d, z=%d\n", mag_x, mag_y, mag_z);
+        #endif
 
         _gyro_samples_available++;
     }
 
     // give back i2c semaphore
-    i2c_sem->give();
+    _i2c_sem->give();
     #else
     // Read all the samples from the FIFO at once
     // BUGBUG this results in sporadically glitchy data
+    // I believe the I2C buffer may only be 32-bytes
     if (hal.i2c->readRegisters(st.hw->addr, st.reg->fifo_r_w, fifo_count, fifo_buffer)) {
         // Unable to read
-        i2c_sem->give();
+        _i2c_sem->give();
         return;
     }
 
     // give back i2c semaphore
-    i2c_sem->give();
+    _i2c_sem->give();
 
     for (uint16_t i=0; i< (fifo_count/packet_size); i++) {        
 

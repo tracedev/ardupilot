@@ -146,6 +146,7 @@ struct PACKED Location {
 #define AP_PRODUCT_ID_L3G4200D          0x101   // Linux with L3G4200D and ADXL345
 #define AP_PRODUCT_ID_PIXHAWK_FIRE_CAPE 0x102   // Linux with the PixHawk Fire Cape
 #define AP_PRODUCT_ID_VRBRAIN           0x150   // VRBRAIN on NuttX
+#define AP_PRODUCT_ID_TRACE             0x160   // Trace Systems
 
 // map from kbaud rate to baudrate
 uint32_t map_baudrate(int16_t rate);

@@ -9,12 +9,13 @@
 #include <AP_Declination.h> // ArduPilot Mega Declination Helper Library
 
 // compass product id
-#define AP_COMPASS_TYPE_UNKNOWN  0x00
-#define AP_COMPASS_TYPE_HIL      0x01
-#define AP_COMPASS_TYPE_HMC5843  0x02
-#define AP_COMPASS_TYPE_HMC5883L 0x03
-#define AP_COMPASS_TYPE_PX4      0x04
-#define AP_COMPASS_TYPE_VRBRAIN  0x05
+#define AP_COMPASS_TYPE_UNKNOWN         0x00
+#define AP_COMPASS_TYPE_HIL             0x01
+#define AP_COMPASS_TYPE_HMC5843         0x02
+#define AP_COMPASS_TYPE_HMC5883L        0x03
+#define AP_COMPASS_TYPE_PX4             0x04
+#define AP_COMPASS_TYPE_VRBRAIN         0x05
+#define AP_COMPASS_TYPE_MPU9150_SLAVE   0x05
 
 // motor compensation types (for use with motor_comp_enabled)
 #define AP_COMPASS_MOT_COMP_DISABLED    0x00

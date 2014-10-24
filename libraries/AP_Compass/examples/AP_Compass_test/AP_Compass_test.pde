@@ -29,6 +29,8 @@ static AP_Compass_PX4 compass;
 static AP_Compass_VRBRAIN compass;
 #elif CONFIG_COMPASS == HAL_COMPASS_HMC5843
 static AP_Compass_HMC5843 compass;
+#elif CONFIG_COMPASS == HAL_COMPASS_MPU9150_SLAVE
+ #error Unable to test MPU9150 compass without INS
 #elif CONFIG_COMPASS == HAL_COMPASS_HIL
 static AP_Compass_HIL compass;
 #else
@@ -62,6 +64,9 @@ void setup() {
         break;
     case AP_COMPASS_TYPE_PX4:
         hal.console->println("PX4");
+        break;
+    case AP_COMPASS_TYPE_MPU9150_SLAVE:
+        hal.console->println("MPU9150_SLAVE")
         break;
     default:
         hal.console->println("unknown");
