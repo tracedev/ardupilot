@@ -30,6 +30,8 @@
 #include <unistd.h>
 #include <time.h>     
 
+#define AK89xx_BYPASS
+
 const extern AP_HAL::HAL& hal;
 
 ///////
@@ -369,6 +371,7 @@ AP_InertialSensor_MPU9150::AP_InertialSensor_MPU9150() :
     _chip_sample_rate(0),
     _compass_addr(0),
     _compass_sample_rate(0),
+    _bypass_mode(false),
     _initialized(false),
     _mpu9150_product_id(AP_PRODUCT_ID_TRACE)
 
@@ -497,20 +500,26 @@ uint16_t AP_InertialSensor_MPU9150::_init_sensor( Sample_rate sample_rate )
         hal.scheduler->panic(PSTR("AP_InertialSensor_MPU9150: mpu_set_sample_rate.\n"));
         goto failed;    
     }
+
     // Select which sensors are pushed to FIFO.
-    sensors = INV_XYZ_ACCEL| INV_XYZ_GYRO | INV_XYZ_COMPASS;
+    sensors = INV_XYZ_ACCEL| INV_XYZ_GYRO;
+
+    mpu_set_sensors(sensors);
+
     if (mpu_configure_fifo(sensors)){
         hal.scheduler->panic(PSTR("AP_InertialSensor_MPU9150: mpu_configure_fifo.\n"));
         goto failed;    
     }
 
+    #ifdef AK89xx_BYPASS
+    mpu_set_bypass(1);
+    #else
     setup_compass();
     if (mpu_set_compass_sample_rate(100)) {
         hal.scheduler->panic(PSTR("AP_InertialSensor_MPU9150: mpu_set_compass_sample_Rate.\n"));
         goto failed;    
     }
-
-    mpu_set_sensors(sensors);
+    #endif
 
     // Set the filter frecuency (_mpu6000_filter configured to the default value, check AP_InertialSensor.cpp)
     _set_filter_frequency(_mpu6000_filter);
@@ -661,7 +670,9 @@ int16_t AP_InertialSensor_MPU9150::mpu_set_sample_rate(uint16_t rate)
                                data);
     
     _chip_sample_rate = 1000 / (1 + data);
+    #ifndef AK89xx_BYPASS
     mpu_set_compass_sample_rate(min(_chip_sample_rate, MAX_COMPASS_SAMPLE_RATE));
+    #endif
 
     return 0;
 }
@@ -677,6 +688,7 @@ int16_t AP_InertialSensor_MPU9150::mpu_set_sample_rate(uint16_t rate)
  *  @param[in]  rate    Desired compass sampling rate (Hz).
  *  @return     0 if successful.
  */
+#ifndef AK89xx_BYPASS
 int16_t AP_InertialSensor_MPU9150::mpu_set_compass_sample_rate(uint16_t rate)
 {
     uint8_t div;
@@ -692,6 +704,7 @@ int16_t AP_InertialSensor_MPU9150::mpu_set_compass_sample_rate(uint16_t rate)
     _compass_sample_rate = _chip_sample_rate / (1 + div);
     return 0;
 }
+#endif
 
 /**
  *  @brief      Select which sensors are pushed to FIFO.
@@ -781,6 +794,7 @@ int16_t AP_InertialSensor_MPU9150::mpu_reset_fifo()
 
 /* This initialization is similar to the one in ak8975.c.
 */
+#ifndef AK89xx_BYPASS
 int16_t AP_InertialSensor_MPU9150::setup_compass(void)
 {
     uint8_t data[4], akm_addr;
@@ -944,6 +958,7 @@ int16_t AP_InertialSensor_MPU9150::read_compass(Vector3f &mag_data)
     return ret;
 
 }
+#endif
 
 /**
  *  @brief      Turn specific sensors on/off.
@@ -992,6 +1007,7 @@ int16_t AP_InertialSensor_MPU9150::mpu_set_sensors(uint8_t sensors)
     }
 #endif
 
+#ifndef AK89xx_BYPASS
     // Handle the compass
      if (hal.i2c->readRegister(st.hw->addr, st.reg->user_ctrl, &user_ctrl))
          return -1;
@@ -1009,6 +1025,16 @@ int16_t AP_InertialSensor_MPU9150::mpu_set_sensors(uint8_t sensors)
      /* Enable/disable I2C master mode. */
      if (hal.i2c->writeRegister(st.hw->addr, st.reg->user_ctrl, user_ctrl))
          return -1;
+#else
+    // Handle the compass
+     if (hal.i2c->readRegister(st.hw->addr, st.reg->user_ctrl, &user_ctrl))
+         return -1;
+     user_ctrl &= ~BIT_AUX_IF_EN;
+     user_ctrl &= ~BIT_DMP_EN;
+     // Disable I2C master mode
+     if (hal.i2c->writeRegister(st.hw->addr, st.reg->user_ctrl, user_ctrl))
+         return -1;
+#endif
 
     _sensors = sensors;
     hal.scheduler->delay(50);
