@@ -27,11 +27,21 @@ public:
     uint8_t get_primary(void) const { return 0; }
 
 private:
+    int16_t setup_compass(void);
+    int16_t get_compass_reg(int16_t *data);
+
     // Ref-to-pointer of MPU9150 inertial sensor
     AP_InertialSensor_MPU9150   &_ins;
 
+    bool            _initialized;
+
+    AP_HAL::Semaphore* _i2c_sem;
+
+    uint8_t         _compass_addr;
+    uint16_t        _compass_sample_rate;
+    int16_t         _mag_sens_adj[3];
+
     uint8_t _num_instances;
-    int _mag_fd[COMPASS_MAX_INSTANCES];
     Vector3f _sum[COMPASS_MAX_INSTANCES];
     uint32_t _count[COMPASS_MAX_INSTANCES];
     uint64_t _last_timestamp[COMPASS_MAX_INSTANCES];
