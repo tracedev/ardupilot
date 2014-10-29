@@ -69,7 +69,7 @@
 #define HAL_COMPASS_PX4            2
 #define HAL_COMPASS_HIL            3
 #define HAL_COMPASS_VRBRAIN        4
-#define HAL_COMPASS_MPU9150_SLAVE  5
+#define HAL_COMPASS_AK8975         5
 
 /**
    CPU classes, used to select if CPU intensive algorithms should be used
@@ -202,7 +202,7 @@
 #define HAL_BOARD_LOG_DIRECTORY "/var/APM/logs"
 #define HAL_INS_DEFAULT HAL_INS_MPU9150
 #define HAL_BARO_DEFAULT HAL_BARO_BMP085
-#define HAL_COMPASS_DEFAULT HAL_COMPASS_MPU9150_SLAVE
+#define HAL_COMPASS_DEFAULT HAL_COMPASS_AK8975
 #else
 #error "no Linux board subtype set"
 #endif

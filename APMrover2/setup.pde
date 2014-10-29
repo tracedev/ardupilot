@@ -525,8 +525,8 @@ static void report_compass()
     case AP_COMPASS_TYPE_HMC5843:
         cliSerial->println_P(PSTR("HMC5843"));
         break;
-    case AP_COMPASS_TYPE_MPU9150_SLAVE:
-        cliSerial->println_P(PSTR("MPU9150_SLAVE"));
+    case AP_COMPASS_TYPE_AK8975:
+        cliSerial->println_P(PSTR("AK8975"));
         break;
     case AP_COMPASS_TYPE_HIL:
         cliSerial->println_P(PSTR("HIL"));

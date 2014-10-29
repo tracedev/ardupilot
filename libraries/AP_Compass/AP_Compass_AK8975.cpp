@@ -15,27 +15,21 @@
  */
 
 /*
- *       AP_Compass_MPU9150_Slave.cpp - MPU9150 Magnetometer to pair with AP_InertialSensor_MPU9150
- *       AP_InertialSensor_MPU9150 configures the MPU9150 as an I2C master on the auxiliary I2C bus
- *       It also sets the MPU9150 to poll the built-in compass (AK8975) on the auxiliary bus and
- *       place it in the Slave 0 registers
- *       This compass driver obtains the latest data from these Slave 0 registers by calling
- *       the AP_InertialSensor_MPU9150 driver
+ *       AP_Compass_AK8975.cpp - AK8975 Magnetometer driver
+ *       Tested with MPU9150; requires I2C slave bus of MPU9150 be put in bypass,
+ *       allowing the CPU I2C bus to access the AK8975
  *
  */
 
 
 #include <AP_HAL.h>
 
-#include "AP_Compass_MPU9150_Slave.h"
-#include "../AP_InertialSensor/AP_InertialSensor_MPU9150.h"
+#include "AP_Compass_AK8975.h"
 #include <stdio.h>
 
 #define AK89xx_FSR (9830)
 
 extern const AP_HAL::HAL& hal;
-
-#define AK89xx_BYPASS
 
 // AK8975_SECONDARY
 #define SUPPORTS_AK89xx_HIGH_SENS   (0x00)
@@ -77,7 +71,7 @@ extern const AP_HAL::HAL& hal;
 
 // Public Methods //////////////////////////////////////////////////////////////
 
-bool AP_Compass_MPU9150_Slave::init(void)
+bool AP_Compass_AK8975::init(void)
 {
     _num_instances = 1;
 
@@ -90,11 +84,12 @@ bool AP_Compass_MPU9150_Slave::init(void)
     _i2c_sem = hal.i2c->get_semaphore();
 
     if (!_i2c_sem->take(HAL_SEMAPHORE_BLOCK_FOREVER)) {
-        hal.scheduler->panic(PSTR("Failed to get Compass_MPU9150_Slave semaphore"));
+        hal.scheduler->panic(PSTR("Failed to get Compass_AK8975 semaphore"));
     }
 
     // We may not be able to initialize here, depending on if the INS has initialized
-    // the AP_InertialSensor_MPU9150 already
+    // the AP_InertialSensor_MPU9150 already to set the I2C bus in bypass mode
+    // Therefore, we need to retry later if we don't initialize
     if (0 == setup_compass()) {
         _initialized = true;
         _healthy[0] = true;
@@ -113,7 +108,7 @@ bool AP_Compass_MPU9150_Slave::init(void)
     return true;
 }
 
-bool AP_Compass_MPU9150_Slave::read(void)
+bool AP_Compass_AK8975::read(void)
 {
     // try to accumulate one more sample, so we have the latest data
     accumulate();
@@ -160,13 +155,11 @@ bool AP_Compass_MPU9150_Slave::read(void)
     return _healthy[0];
 }
 
-void AP_Compass_MPU9150_Slave::accumulate(void)
+void AP_Compass_AK8975::accumulate(void)
 {
     Vector3f mag_data;
-    #ifdef AK89xx_BYPASS
     int16_t data[3];
     int16_t ret;
-    #endif
 
     if (!_initialized) {
         // We may not have been able to initialize yet, try here
@@ -185,7 +178,6 @@ void AP_Compass_MPU9150_Slave::accumulate(void)
         }
     }
 
-    #ifdef AK89xx_BYPASS
     // take i2c bus sempahore
     if (!_i2c_sem->take(1)) {
         return;
@@ -197,10 +189,6 @@ void AP_Compass_MPU9150_Slave::accumulate(void)
     if (0 == ret) {
         mag_data = Vector3f(data[0], data[1], data[2]);
         _healthy[0] = true;
-    #else
-    // Get the sample from the AP_InertialSensor_MPU9150 driver
-    if (0 == _ins.read_compass(mag_data)) {
-    #endif
         _sum[0] += mag_data;
         _count[0]++;
         _last_timestamp[0] = hal.scheduler->micros64();
@@ -208,8 +196,8 @@ void AP_Compass_MPU9150_Slave::accumulate(void)
 
 }
 
-// The MPU9150 must already be in bypass mode
-int16_t AP_Compass_MPU9150_Slave::setup_compass(void)
+// The AK8975 must already be in bypass mode
+int16_t AP_Compass_AK8975::setup_compass(void)
 {
     uint8_t data[4], akm_addr;
 
@@ -222,10 +210,12 @@ int16_t AP_Compass_MPU9150_Slave::setup_compass(void)
     }
 
     if (akm_addr > 0x0F) {
-        // RCB We should probably only try the compass setup so many times before
+        // We may not be able to find the compass if the AK8975 hasn't been
+        // configured in bypass mode yet
+        // TODO We should probably only try the compass setup so many times before
         // panic sets in
-        //hal.scheduler->panic(PSTR("AP_Compass_MPU9150_Slave: Compass not found.\n"));
-        hal.console->printf("AP_Compass_MPU9150_Slave: Compass not found.\n", akm_addr);
+        //hal.scheduler->panic(PSTR("AP_Compass_AK8975: Compass not found.\n"));
+        hal.console->printf("AP_Compass_AK8975: Compass not found.\n", akm_addr);
         return -1;
     } else {
         hal.console->printf("Found compass at 0x%02x\n", akm_addr);
@@ -271,7 +261,7 @@ int16_t AP_Compass_MPU9150_Slave::setup_compass(void)
  *  @param[out] data        Raw data in hardware units.
  *  @return     0 if successful.
  */
-int16_t AP_Compass_MPU9150_Slave::get_compass_reg(int16_t *data)
+int16_t AP_Compass_AK8975::get_compass_reg(int16_t *data)
 {
     uint8_t tmp[9];
 

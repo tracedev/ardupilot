@@ -7,4 +7,4 @@
 #include "AP_Compass_HIL.h"
 #include "AP_Compass_PX4.h"
 #include "AP_Compass_VRBRAIN.h"
-#include "AP_Compass_MPU9150_Slave.h"
+#include "AP_Compass_AK8975.h"

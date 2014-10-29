@@ -1,19 +1,17 @@
 /// -*- tab-width: 4; Mode: C++; c-basic-offset: 4; indent-tabs-mode: nil -*-
 
-#ifndef AP_Compass_MPU9150_Slave_H
-#define AP_Compass_MPU9150_Slave_H
+#ifndef AP_Compass_AK8975_H
+#define AP_Compass_AK8975_H
 
 #include "Compass.h"
-#include "../AP_InertialSensor/AP_InertialSensor_MPU9150.h"
 
-class AP_Compass_MPU9150_Slave : public Compass
+class AP_Compass_AK8975 : public Compass
 {
 public:
-    AP_Compass_MPU9150_Slave(AP_InertialSensor_MPU9150 &ins) : 
-        Compass(),
-        _ins(ins)
+    AP_Compass_AK8975() : 
+        Compass()
     {
-        product_id = AP_COMPASS_TYPE_MPU9150_SLAVE;
+        product_id = AP_COMPASS_TYPE_AK8975;
         _num_instances = 0;
     }
     bool        init(void);
@@ -30,9 +28,6 @@ private:
     int16_t setup_compass(void);
     int16_t get_compass_reg(int16_t *data);
 
-    // Ref-to-pointer of MPU9150 inertial sensor
-    AP_InertialSensor_MPU9150   &_ins;
-
     bool            _initialized;
 
     AP_HAL::Semaphore* _i2c_sem;
@@ -47,5 +42,5 @@ private:
     uint64_t _last_timestamp[COMPASS_MAX_INSTANCES];
 };
 
-#endif // AP_Compass_MPU9150_Slave_H
+#endif // AP_Compass_AK8975_H
 

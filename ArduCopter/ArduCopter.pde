@@ -272,6 +272,20 @@ static AP_Baro_MS5611 barometer(&AP_Baro_MS5611::spi);
 #endif
 static Baro_Glitch baro_glitch(barometer);
 
+#if CONFIG_COMPASS == HAL_COMPASS_PX4
+static AP_Compass_PX4 compass;
+#elif CONFIG_COMPASS == HAL_COMPASS_VRBRAIN
+static AP_Compass_VRBRAIN compass;
+#elif CONFIG_COMPASS == HAL_COMPASS_HMC5843
+static AP_Compass_HMC5843 compass;
+#elif CONFIG_COMPASS == HAL_COMPASS_AK8975
+static AP_Compass_AK8975 compass;
+#elif CONFIG_COMPASS == HAL_COMPASS_HIL
+static AP_Compass_HIL compass;
+#else
+ #error Unrecognized CONFIG_COMPASS setting
+#endif
+
 #if CONFIG_INS_TYPE == HAL_INS_OILPAN || CONFIG_HAL_BOARD == HAL_BOARD_APM1
 AP_ADC_ADS7844 apm1_adc;
 #endif
@@ -297,22 +311,6 @@ AP_InertialSensor_MPU9150 ins;
 #else
   #error Unrecognised CONFIG_INS_TYPE setting.
 #endif // CONFIG_INS_TYPE
-
-#if CONFIG_COMPASS == HAL_COMPASS_PX4
-static AP_Compass_PX4 compass;
-#elif CONFIG_COMPASS == HAL_COMPASS_VRBRAIN
-static AP_Compass_VRBRAIN compass;
-#elif CONFIG_COMPASS == HAL_COMPASS_HMC5843
-static AP_Compass_HMC5843 compass;
-#elif CONFIG_COMPASS == HAL_COMPASS_MPU9150_SLAVE && CONFIG_INS_TYPE == HAL_INS_MPU9150
-static AP_Compass_MPU9150_Slave compass(ins);
-#elif CONFIG_COMPASS == HAL_COMPASS_MPU9150_SLAVE && CONFIG_INS_TYPE != HAL_INS_MPU9150
- #error Invalid CONFIG_COMPASS setting, MPU9150_SLAVE cannot be used without INS_MPU9150
-#elif CONFIG_COMPASS == HAL_COMPASS_HIL
-static AP_Compass_HIL compass;
-#else
- #error Unrecognized CONFIG_COMPASS setting
-#endif
 
 // Inertial Navigation EKF
 #if AP_AHRS_NAVEKF_AVAILABLE

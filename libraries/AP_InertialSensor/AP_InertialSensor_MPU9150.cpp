@@ -369,8 +369,6 @@ AP_InertialSensor_MPU9150::AP_InertialSensor_MPU9150() :
     //_mag_filter_y(800, 10),    
     //_mag_filter_z(800, 10),
     _chip_sample_rate(0),
-    _compass_addr(0),
-    _compass_sample_rate(0),
     _bypass_mode(false),
     _initialized(false),
     _mpu9150_product_id(AP_PRODUCT_ID_TRACE)
@@ -511,15 +509,8 @@ uint16_t AP_InertialSensor_MPU9150::_init_sensor( Sample_rate sample_rate )
         goto failed;    
     }
 
-    #ifdef AK89xx_BYPASS
+    // Compass will be accessed in bypass mode
     mpu_set_bypass(1);
-    #else
-    setup_compass();
-    if (mpu_set_compass_sample_rate(100)) {
-        hal.scheduler->panic(PSTR("AP_InertialSensor_MPU9150: mpu_set_compass_sample_Rate.\n"));
-        goto failed;    
-    }
-    #endif
 
     // Set the filter frecuency (_mpu6000_filter configured to the default value, check AP_InertialSensor.cpp)
     _set_filter_frequency(_mpu6000_filter);
@@ -670,41 +661,9 @@ int16_t AP_InertialSensor_MPU9150::mpu_set_sample_rate(uint16_t rate)
                                data);
     
     _chip_sample_rate = 1000 / (1 + data);
-    #ifndef AK89xx_BYPASS
-    mpu_set_compass_sample_rate(min(_chip_sample_rate, MAX_COMPASS_SAMPLE_RATE));
-    #endif
 
     return 0;
 }
-
-/**
- *  @brief      Set compass sampling rate.
- *  The compass on the auxiliary I2C bus is read by the MPU hardware at a
- *  maximum of 100Hz. The actual rate can be set to a fraction of the gyro
- *  sampling rate.
- *
- *  \n WARNING: The new rate may be different than what was requested. Call
- *  mpu_get_compass_sample_rate to check the actual setting.
- *  @param[in]  rate    Desired compass sampling rate (Hz).
- *  @return     0 if successful.
- */
-#ifndef AK89xx_BYPASS
-int16_t AP_InertialSensor_MPU9150::mpu_set_compass_sample_rate(uint16_t rate)
-{
-    uint8_t div;
-    if (!rate || rate > MAX_COMPASS_SAMPLE_RATE){
-        return -1;
-    }
-
-    div = _chip_sample_rate / rate - 1;
-    hal.i2c->writeRegister(st.hw->addr, 
-                           st.reg->s4_ctrl,
-                           div);
-
-    _compass_sample_rate = _chip_sample_rate / (1 + div);
-    return 0;
-}
-#endif
 
 /**
  *  @brief      Select which sensors are pushed to FIFO.
@@ -791,175 +750,6 @@ int16_t AP_InertialSensor_MPU9150::mpu_reset_fifo()
     return 0;
 }
 
-
-/* This initialization is similar to the one in ak8975.c.
-*/
-#ifndef AK89xx_BYPASS
-int16_t AP_InertialSensor_MPU9150::setup_compass(void)
-{
-    uint8_t data[4], akm_addr;
-
-    mpu_set_bypass(1);
-
-    /* Find compass. Possible addresses range from 0x0C to 0x0F. */
-    for (akm_addr = 0x0C; akm_addr <= 0x0F; akm_addr++) {
-        uint8_t result;
-        result = hal.i2c->readRegister(akm_addr, AKM_REG_WHOAMI, data);
-        if (!result && (data[0] == AKM_WHOAMI))
-            break;
-    }
-
-    if (akm_addr > 0x0F) {
-        /* TODO: Handle this case in all compass-related functions. */
-        hal.scheduler->panic(PSTR("AP_InertialSensor_MPU9150: Compass not found.\n"));
-        return -1;
-    } else {
-        printf("Found compass at 0x%02x\n", akm_addr);
-    }
-
-    _compass_addr = akm_addr;
-
-    data[0] = AKM_POWER_DOWN;
-    if (hal.i2c->writeRegister(_compass_addr, AKM_REG_CNTL, data[0]))
-        return -1;
-    hal.scheduler->delay(1);
-
-    data[0] = AKM_FUSE_ROM_ACCESS;
-    if (hal.i2c->writeRegister(_compass_addr, AKM_REG_CNTL, data[0]))
-        return -1;
-    hal.scheduler->delay(1);
-
-    /* Get sensitivity adjustment data from fuse ROM. */
-    if (hal.i2c->readRegisters(_compass_addr, AKM_REG_ASAX, 3, data))
-        return -1;
-    _mag_sens_adj[0] = (long)data[0] + 128;
-    _mag_sens_adj[1] = (long)data[1] + 128;
-    _mag_sens_adj[2] = (long)data[2] + 128;
-
-    data[0] = AKM_POWER_DOWN;
-    if (hal.i2c->writeRegister(_compass_addr, AKM_REG_CNTL, data[0]))
-        return -1;
-    hal.scheduler->delay(1);
-
-    mpu_set_bypass(0);
-
-    /* Set up master mode, master clock, and ES bit. */
-    data[0] = 0x40;
-    if (hal.i2c->writeRegister(st.hw->addr, st.reg->i2c_mst, data[0]))
-        return -1;
-
-    /* Slave 0 reads from AKM data registers. */
-    data[0] = BIT_I2C_READ | _compass_addr;
-    if (hal.i2c->writeRegister(st.hw->addr, st.reg->s0_addr, data[0]))
-        return -1;
-
-    /* Compass reads start at this register. */
-    data[0] = AKM_REG_ST1;
-    if (hal.i2c->writeRegister(st.hw->addr, st.reg->s0_reg, data[0]))
-        return -1;
-
-    /* Enable slave 0, 8-byte reads. */
-    data[0] = BIT_SLAVE_EN | 8;
-    if (hal.i2c->writeRegister(st.hw->addr, st.reg->s0_ctrl, data[0]))
-        return -1;
-
-    /* Slave 1 changes AKM measurement mode. */
-    data[0] = _compass_addr;
-    if (hal.i2c->writeRegister(st.hw->addr, st.reg->s1_addr, data[0]))
-        return -1;
-
-    /* AKM measurement mode register. */
-    data[0] = AKM_REG_CNTL;
-    if (hal.i2c->writeRegister(st.hw->addr, st.reg->s1_reg, data[0]))
-        return -1;
-
-    /* Enable slave 1, 1-byte writes. */
-    data[0] = BIT_SLAVE_EN | 1;
-    if (hal.i2c->writeRegister(st.hw->addr, st.reg->s1_ctrl, data[0]))
-        return -1;
-
-    /* Set slave 1 data. */
-    data[0] = AKM_SINGLE_MEASUREMENT;
-    if (hal.i2c->writeRegister(st.hw->addr, st.reg->s1_do, data[0]))
-        return -1;
-
-    /* Trigger slave 0 and slave 1 actions at a decreased rate (based on i2c_mst_dly. */
-    data[0] = 0x03;
-    if (hal.i2c->writeRegister(st.hw->addr, st.reg->i2c_delay_ctrl, data[0]))
-        return -1;
-
-    /* For the MPU9150, the auxiliary I2C bus needs to be set to VDD. */
-    data[0] = BIT_I2C_MST_VDDIO;
-    if (hal.i2c->writeRegister(st.hw->addr, st.reg->yg_offs_tc, data[0]))
-        return -1;
-
-    return 0;
-}
-
-/**
- *  @brief      Read raw compass data from I2C slave external
- *              sensor register.
- *  @param[out] data        Raw data in hardware units.
- *  @return     0 if successful.
- */
-int16_t AP_InertialSensor_MPU9150::mpu_get_compass_reg(int16_t *data)
-{
-    uint8_t tmp[9];
-
-    if (!(_sensors & INV_XYZ_COMPASS))
-        return -1;
-
-    if (hal.i2c->readRegisters(st.hw->addr, st.reg->raw_compass, 8, tmp))
-        return -1;
-
-    /* AK8975 doesn't have the overrun error bit. */
-    if (!(tmp[0] & AKM_DATA_READY))
-        return -2;
-    if ((tmp[7] & AKM_OVERFLOW) || (tmp[7] & AKM_DATA_ERROR))
-        return -3;
-
-    data[0] = (tmp[2] << 8) | tmp[1];
-    data[1] = (tmp[4] << 8) | tmp[3];
-    data[2] = (tmp[6] << 8) | tmp[5];
-
-    data[0] = ((long)data[0] * _mag_sens_adj[0]) >> 8;
-    data[1] = ((long)data[1] * _mag_sens_adj[1]) >> 8;
-    data[2] = ((long)data[2] * _mag_sens_adj[2]) >> 8;
-
-    return 0;
-}
-
-/**
- *  @brief      Take the bus and read compass results
- *  @param[out] mag_data        Magnetometer data
- *  @return     0 if successful.
- */
-int16_t AP_InertialSensor_MPU9150::read_compass(Vector3f &mag_data)
-{
-
-    int16_t data[3];
-    int16_t ret;
-
-    if (!_initialized) {
-        return 1;
-    }
-
-    // take i2c bus sempahore
-    if (!_i2c_sem->take_nonblocking()){
-        return 2;
-    }
-
-    ret = mpu_get_compass_reg(data);
-    if (0 == ret) {
-        mag_data = Vector3f(data[0], data[1], data[2]);
-    }
-
-    _i2c_sem->give();
-    return ret;
-
-}
-#endif
-
 /**
  *  @brief      Turn specific sensors on/off.
  *  @e sensors can contain a combination of the following flags:
@@ -1007,34 +797,14 @@ int16_t AP_InertialSensor_MPU9150::mpu_set_sensors(uint8_t sensors)
     }
 #endif
 
-#ifndef AK89xx_BYPASS
-    // Handle the compass
-     if (hal.i2c->readRegister(st.hw->addr, st.reg->user_ctrl, &user_ctrl))
-         return -1;
-     /* Handle AKM power management. */
-     if (sensors & INV_XYZ_COMPASS) {
-         data = AKM_SINGLE_MEASUREMENT;
-         user_ctrl |= BIT_AUX_IF_EN;
-     } else {
-         data = AKM_POWER_DOWN;
-         user_ctrl &= ~BIT_AUX_IF_EN;
-     }
-     user_ctrl &= ~BIT_DMP_EN;
-     if (hal.i2c->writeRegister(st.hw->addr, st.reg->s1_do, data))
-         return -1;
-     /* Enable/disable I2C master mode. */
-     if (hal.i2c->writeRegister(st.hw->addr, st.reg->user_ctrl, user_ctrl))
-         return -1;
-#else
-    // Handle the compass
-     if (hal.i2c->readRegister(st.hw->addr, st.reg->user_ctrl, &user_ctrl))
-         return -1;
-     user_ctrl &= ~BIT_AUX_IF_EN;
-     user_ctrl &= ~BIT_DMP_EN;
-     // Disable I2C master mode
-     if (hal.i2c->writeRegister(st.hw->addr, st.reg->user_ctrl, user_ctrl))
-         return -1;
-#endif
+    // The compass will be accessed externally (bypass mode)
+    if (hal.i2c->readRegister(st.hw->addr, st.reg->user_ctrl, &user_ctrl))
+        return -1;
+    user_ctrl &= ~BIT_AUX_IF_EN;
+    user_ctrl &= ~BIT_DMP_EN;
+    // Disable I2C master mode
+    if (hal.i2c->writeRegister(st.hw->addr, st.reg->user_ctrl, user_ctrl))
+        return -1;
 
     _sensors = sensors;
     hal.scheduler->delay(50);
@@ -1298,15 +1068,6 @@ void AP_InertialSensor_MPU9150::_accumulate(void){
             _gyro_filter_x.apply(gyro_x), 
             _gyro_filter_y.apply(gyro_y), 
             _gyro_filter_z.apply(gyro_z));
-
-        #if 0
-        _mag_filtered = Vector3f(
-            _mag_filter_x.apply(mag_x), 
-            _mag_filter_y.apply(mag_y), 
-            _mag_filter_z.apply(mag_z));
-
-        printf("compass: x=%d, y=%d, z=%d\n", mag_x, mag_y, mag_z);
-        #endif
 
         _gyro_samples_available++;
     }
