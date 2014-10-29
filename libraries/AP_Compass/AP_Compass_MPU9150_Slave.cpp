@@ -97,6 +97,7 @@ bool AP_Compass_MPU9150_Slave::init(void)
     // the AP_InertialSensor_MPU9150 already
     if (0 == setup_compass()) {
         _initialized = true;
+        _healthy[0] = true;
         // give the driver a chance to run, and gather one sample
         hal.scheduler->delay(40);
         accumulate();
@@ -174,6 +175,7 @@ void AP_Compass_MPU9150_Slave::accumulate(void)
         }
         if (0 == setup_compass()) {
              _i2c_sem->give();
+             _healthy[0] = true;
              hal.console->printf("Successful compass setup in accumulate\n");
             _initialized = true;
         } else {
@@ -185,7 +187,7 @@ void AP_Compass_MPU9150_Slave::accumulate(void)
 
     #ifdef AK89xx_BYPASS
     // take i2c bus sempahore
-    if (!_i2c_sem->take_nonblocking()){
+    if (!_i2c_sem->take(1)) {
         return;
     }
 
@@ -194,6 +196,7 @@ void AP_Compass_MPU9150_Slave::accumulate(void)
 
     if (0 == ret) {
         mag_data = Vector3f(data[0], data[1], data[2]);
+        _healthy[0] = true;
     #else
     // Get the sample from the AP_InertialSensor_MPU9150 driver
     if (0 == _ins.read_compass(mag_data)) {
