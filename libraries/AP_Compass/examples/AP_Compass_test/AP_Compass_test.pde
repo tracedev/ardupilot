@@ -29,6 +29,8 @@ static AP_Compass_PX4 compass;
 static AP_Compass_VRBRAIN compass;
 #elif CONFIG_COMPASS == HAL_COMPASS_HMC5843
 static AP_Compass_HMC5843 compass;
+#elif CONFIG_COMPASS == HAL_COMPASS_AK8975
+static AP_Compass_AK8975 compass;
 #elif CONFIG_COMPASS == HAL_COMPASS_HIL
 static AP_Compass_HIL compass;
 #else
@@ -62,6 +64,9 @@ void setup() {
         break;
     case AP_COMPASS_TYPE_PX4:
         hal.console->println("PX4");
+        break;
+    case AP_COMPASS_TYPE_AK8975:
+        hal.console->println("AK8975")
         break;
     default:
         hal.console->println("unknown");

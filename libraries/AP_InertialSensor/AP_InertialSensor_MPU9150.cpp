@@ -30,6 +30,8 @@
 #include <unistd.h>
 #include <time.h>     
 
+#define AK89xx_BYPASS
+
 const extern AP_HAL::HAL& hal;
 
 ///////
@@ -113,7 +115,8 @@ struct gyro_state_s {
 };
 
 /* Filter configurations. The values correspond to the DLPF_CFG register.
-Note that the gyro and accel frequencies are slightly different.
+Note that the gyro and accel frequencies are slightly different. 
+The frequencies listed are for the gyro. 
  (DLPF_CFG register, RM-MPU-9150A00.pdf, pg. 13)
 */
 enum lpf_e {
@@ -222,9 +225,43 @@ enum clock_sel_e {
 #define BIT_STBY_ZG         (0x01)
 #define BIT_STBY_XYZA       (BIT_STBY_XA | BIT_STBY_YA | BIT_STBY_ZA)
 #define BIT_STBY_XYZG       (BIT_STBY_XG | BIT_STBY_YG | BIT_STBY_ZG)
+
 // AK8975_SECONDARY
 #define SUPPORTS_AK89xx_HIGH_SENS   (0x00)
 #define AK89xx_FSR                  (9830)
+
+// AK89xx_SECONDARY
+#define AKM_REG_WHOAMI      (0x00)
+
+#define AKM_REG_ST1         (0x02)
+#define AKM_REG_HXL         (0x03)
+#define AKM_REG_HXH         (0x04)
+#define AKM_REG_HYL         (0x05)
+#define AKM_REG_HYH         (0x06)
+#define AKM_REG_HZL         (0x07)
+#define AKM_REG_HZH         (0x08)
+#define AKM_REG_ST2         (0x09)
+
+#define AKM_REG_CNTL        (0x0A)
+#define AKM_REG_ASTC        (0x0C)
+#define AKM_REG_ASAX        (0x10)
+#define AKM_REG_ASAY        (0x11)
+#define AKM_REG_ASAZ        (0x12)
+
+#define AKM_DATA_READY      (0x01)
+#define AKM_DATA_OVERRUN    (0x02)
+#define AKM_OVERFLOW        (0x80)
+#define AKM_DATA_ERROR      (0x40)
+
+#define AKM_BIT_SELF_TEST   (0x40)
+
+#define AKM_POWER_DOWN          (0x00 | SUPPORTS_AK89xx_HIGH_SENS)
+#define AKM_SINGLE_MEASUREMENT  (0x01 | SUPPORTS_AK89xx_HIGH_SENS)
+#define AKM_FUSE_ROM_ACCESS     (0x0F | SUPPORTS_AK89xx_HIGH_SENS)
+#define AKM_MODE_SELF_TEST      (0x08 | SUPPORTS_AK89xx_HIGH_SENS)
+
+#define AKM_WHOAMI      (0x48)
+
 #define MAX_COMPASS_SAMPLE_RATE (100)
 
 // Gyroscope scale (uncertain where the 0.01745 value comes from)
@@ -327,10 +364,15 @@ AP_InertialSensor_MPU9150::AP_InertialSensor_MPU9150() :
     _accel_filter_z(800, 10),
     _gyro_filter_x(800, 10),
     _gyro_filter_y(800, 10),
-    _gyro_filter_z(800, 10)    
-    // _mag_filter_x(800, 10),    
-    // _mag_filter_y(800, 10),    
-    // _mag_filter_z(800, 10)    
+    _gyro_filter_z(800, 10),    
+    //_mag_filter_x(800, 10),    
+    //_mag_filter_y(800, 10),    
+    //_mag_filter_z(800, 10),
+    _chip_sample_rate(0),
+    _bypass_mode(false),
+    _initialized(false),
+    _mpu9150_product_id(AP_PRODUCT_ID_TRACE)
+
 {
 
 }
@@ -354,10 +396,14 @@ void AP_InertialSensor_MPU9150::_set_filter_frequency(uint8_t filter_hz)
 /**
  *  @brief      Init method
  *  @param[in] Sample_rate  The sample rate, check the struct def.
- *  @return     AP_PRODUCT_ID_PIXHAWK_FIRE_CAPE if successful.
+ *  @return     AP_PRODUCT_ID_TRACE if successful.
  */
 uint16_t AP_InertialSensor_MPU9150::_init_sensor( Sample_rate sample_rate ) 
 {
+
+    if (_initialized) return _mpu9150_product_id;
+    _initialized = true;
+
     // Sensors pushed to the FIFO.
     uint8_t sensors;
 
@@ -382,10 +428,10 @@ uint16_t AP_InertialSensor_MPU9150::_init_sensor( Sample_rate sample_rate )
     }
 
     // get pointer to i2c bus semaphore
-    AP_HAL::Semaphore* i2c_sem = hal.i2c->get_semaphore();
+    _i2c_sem = hal.i2c->get_semaphore();
 
     // take i2c bus sempahore
-    if (!i2c_sem->take(HAL_SEMAPHORE_BLOCK_FOREVER)){
+    if (!_i2c_sem->take(HAL_SEMAPHORE_BLOCK_FOREVER)){
         return -1;
     }        
 
@@ -446,38 +492,38 @@ uint16_t AP_InertialSensor_MPU9150::_init_sensor( Sample_rate sample_rate )
         goto failed;    
     }
     // Set sampling rate (value must be between 4Hz and 1KHz)
+    // Because this uses a single divider, 800 Hz will actually be 1kHz
+    // The resulting rate can be found in _chip_sample_rate
     if (mpu_set_sample_rate(800)){
         hal.scheduler->panic(PSTR("AP_InertialSensor_MPU9150: mpu_set_sample_rate.\n"));
         goto failed;    
     }
+
     // Select which sensors are pushed to FIFO.
     sensors = INV_XYZ_ACCEL| INV_XYZ_GYRO;
+
+    mpu_set_sensors(sensors);
+
     if (mpu_configure_fifo(sensors)){
         hal.scheduler->panic(PSTR("AP_InertialSensor_MPU9150: mpu_configure_fifo.\n"));
         goto failed;    
     }
 
-    // For now the compass is not used.
-    // TODO adjust the functions to the ArduPilot API
-
-    // setup_compass();
-    // if (mpu_set_compass_sample_rate(10, 400))
-    //     return -1;
-
-    mpu_set_sensors(sensors);
+    // Compass will be accessed in bypass mode
+    mpu_set_bypass(1);
 
     // Set the filter frecuency (_mpu6000_filter configured to the default value, check AP_InertialSensor.cpp)
     _set_filter_frequency(_mpu6000_filter);
 
     // give back i2c semaphore
-    i2c_sem->give();
+    _i2c_sem->give();
     // start the timer process to read samples    
     hal.scheduler->register_timer_process(AP_HAL_MEMBERPROC(&AP_InertialSensor_MPU9150::_accumulate));
     return AP_PRODUCT_ID_PIXHAWK_FIRE_CAPE;
 
     failed:
         // give back i2c semaphore
-        i2c_sem->give();
+        _i2c_sem->give();
         return -1;
 }
 
@@ -583,6 +629,15 @@ int16_t AP_InertialSensor_MPU9150::mpu_set_lpf(uint16_t lpf)
 /**
  *  @brief      Set sampling rate.
  *  Sampling rate must be between 4Hz and 1kHz.
+ *  The sensor register and FIFO output is based on this rate
+ *  When DLPF is enabled (which it is), the gyroscopic output
+ *  rate is 1kHz; when disabled it is 8kHz.
+ *  The sample rate is generated by dividing the gyroscopic
+ *  output rate by (1+SMPLRT_DIV)
+ *  Note that accelerometer output rate is 1kHz, so if the rate
+ *  is higher than 1kHz data in the FIFO may be repeated.
+ *  The actual rate will not be exactly what is set since it is
+ *  single divider based.
  *  @param[in]  rate    Desired sampling rate (Hz).
  *  @return     0 if successful.
  */
@@ -590,6 +645,8 @@ int16_t AP_InertialSensor_MPU9150::mpu_set_sample_rate(uint16_t rate)
 {
     uint8_t data;
     // uint16_t sample_rate;
+
+    // Sample rate is generated by dividing the gyro output rate
 
     if (rate < 4){
         rate = 4;
@@ -603,34 +660,8 @@ int16_t AP_InertialSensor_MPU9150::mpu_set_sample_rate(uint16_t rate)
                                st.reg->rate_div,
                                data);
     
-    // sample_rate = 1000 / (1 + data);
-    // mpu_set_compass_sample_rate(min(sample_rate, MAX_COMPASS_SAMPLE_RATE), rate);
+    _chip_sample_rate = 1000 / (1 + data);
 
-    return 0;
-}
-
-/**
- *  @brief      Set compass sampling rate.
- *  The compass on the auxiliary I2C bus is read by the MPU hardware at a
- *  maximum of 100Hz. The actual rate can be set to a fraction of the gyro
- *  sampling rate.
- *
- *  \n WARNING: The new rate may be different than what was requested. Call
- *  mpu_get_compass_sample_rate to check the actual setting.
- *  @param[in]  rate    Desired compass sampling rate (Hz).
- *  @return     0 if successful.
- */
-int16_t AP_InertialSensor_MPU9150::mpu_set_compass_sample_rate(uint16_t rate, uint16_t chip_sample_rate)
-{
-    uint8_t div;
-    if (!rate || rate > MAX_COMPASS_SAMPLE_RATE){
-        return -1;
-    }
-
-    div = chip_sample_rate / rate - 1;
-    hal.i2c->writeRegister(st.hw->addr, 
-                           st.reg->s4_ctrl,
-                           div);
     return 0;
 }
 
@@ -654,7 +685,7 @@ int16_t AP_InertialSensor_MPU9150::mpu_configure_fifo(uint8_t sensors)
     // set_int_enable(1);
     set_int_enable(0);
     if (sensors) {
-        if (mpu_reset_fifo(sensors)) {            
+        if (mpu_reset_fifo()) {            
             return -1;
         }
     }
@@ -688,7 +719,7 @@ int16_t AP_InertialSensor_MPU9150::set_int_enable(uint8_t enable)
  *  @brief  Reset FIFO read/write pointers.
  *  @return 0 if successful.
  */
-int16_t AP_InertialSensor_MPU9150::mpu_reset_fifo(uint8_t sensors)
+int16_t AP_InertialSensor_MPU9150::mpu_reset_fifo()
 {
     uint8_t data;
 
@@ -699,8 +730,14 @@ int16_t AP_InertialSensor_MPU9150::mpu_reset_fifo(uint8_t sensors)
     data = BIT_FIFO_RST;
     hal.i2c->writeRegister(st.hw->addr,st.reg->user_ctrl, data);
 
-    data = BIT_FIFO_EN;
-    // data = BIT_FIFO_EN | BIT_AUX_IF_EN;
+    if (_bypass_mode || !(_sensors & INV_XYZ_COMPASS)) {
+        data = BIT_FIFO_EN; 
+    } else {
+        // Enable I2C master for aux bus if compass in use
+        printf("Enabling I2C master for aux bus\n");
+        data = BIT_FIFO_EN | BIT_AUX_IF_EN;
+    }
+        
     hal.i2c->writeRegister(st.hw->addr,st.reg->user_ctrl, data);
     hal.scheduler->delay(50);
 
@@ -709,114 +746,9 @@ int16_t AP_InertialSensor_MPU9150::mpu_reset_fifo(uint8_t sensors)
     data = 0;
     hal.i2c->writeRegister(st.hw->addr,st.reg->int_enable, data);
     // enable FIFO
-    hal.i2c->writeRegister(st.hw->addr,st.reg->fifo_en, sensors);
+    hal.i2c->writeRegister(st.hw->addr,st.reg->fifo_en, _sensors);
     return 0;
 }
-
-
-#if 0
-/* This initialization is similar to the one in ak8975.c. 
-        TODO: Use the ArduPilot APIs (write, read, ...), remove the st.chip_cfg cache vars
-*/
-static int AP_InertialSensor_MPU9150::setup_compass(void)
-{
-    uint8_t data[4], akm_addr;
-
-    mpu_set_bypass(1);
-
-    /* Find compass. Possible addresses range from 0x0C to 0x0F. */
-    for (akm_addr = 0x0C; akm_addr <= 0x0F; akm_addr++) {
-        int result;
-        result = i2c_read(akm_addr, AKM_REG_WHOAMI, 1, data);
-        if (!result && (data[0] == AKM_WHOAMI))
-            break;
-    }
-
-    if (akm_addr > 0x0F) {
-        /* TODO: Handle this case in all compass-related functions. */
-        log_e("Compass not found.\n");
-        return -1;
-    }
-
-    st.chip_cfg.compass_addr = akm_addr;
-
-    data[0] = AKM_POWER_DOWN;
-    if (i2c_write(st.chip_cfg.compass_addr, AKM_REG_CNTL, 1, data))
-        return -1;
-    delay_ms(1);
-
-    data[0] = AKM_FUSE_ROM_ACCESS;
-    if (i2c_write(st.chip_cfg.compass_addr, AKM_REG_CNTL, 1, data))
-        return -1;
-    delay_ms(1);
-
-    /* Get sensitivity adjustment data from fuse ROM. */
-    if (i2c_read(st.chip_cfg.compass_addr, AKM_REG_ASAX, 3, data))
-        return -1;
-    st.chip_cfg.mag_sens_adj[0] = (long)data[0] + 128;
-    st.chip_cfg.mag_sens_adj[1] = (long)data[1] + 128;
-    st.chip_cfg.mag_sens_adj[2] = (long)data[2] + 128;
-
-    data[0] = AKM_POWER_DOWN;
-    if (i2c_write(st.chip_cfg.compass_addr, AKM_REG_CNTL, 1, data))
-        return -1;
-    delay_ms(1);
-
-    mpu_set_bypass(0);
-
-    /* Set up master mode, master clock, and ES bit. */
-    data[0] = 0x40;
-    if (i2c_write(st.hw->addr, st.reg->i2c_mst, 1, data))
-        return -1;
-
-    /* Slave 0 reads from AKM data registers. */
-    data[0] = BIT_I2C_READ | st.chip_cfg.compass_addr;
-    if (i2c_write(st.hw->addr, st.reg->s0_addr, 1, data))
-        return -1;
-
-    /* Compass reads start at this register. */
-    data[0] = AKM_REG_ST1;
-    if (i2c_write(st.hw->addr, st.reg->s0_reg, 1, data))
-        return -1;
-
-    /* Enable slave 0, 8-byte reads. */
-    data[0] = BIT_SLAVE_EN | 8;
-    if (i2c_write(st.hw->addr, st.reg->s0_ctrl, 1, data))
-        return -1;
-
-    /* Slave 1 changes AKM measurement mode. */
-    data[0] = st.chip_cfg.compass_addr;
-    if (i2c_write(st.hw->addr, st.reg->s1_addr, 1, data))
-        return -1;
-
-    /* AKM measurement mode register. */
-    data[0] = AKM_REG_CNTL;
-    if (i2c_write(st.hw->addr, st.reg->s1_reg, 1, data))
-        return -1;
-
-    /* Enable slave 1, 1-byte writes. */
-    data[0] = BIT_SLAVE_EN | 1;
-    if (i2c_write(st.hw->addr, st.reg->s1_ctrl, 1, data))
-        return -1;
-
-    /* Set slave 1 data. */
-    data[0] = AKM_SINGLE_MEASUREMENT;
-    if (i2c_write(st.hw->addr, st.reg->s1_do, 1, data))
-        return -1;
-
-    /* Trigger slave 0 and slave 1 actions at each sample. */
-    data[0] = 0x03;
-    if (i2c_write(st.hw->addr, st.reg->i2c_delay_ctrl, 1, data))
-        return -1;
-
-    /* For the MPU9150, the auxiliary I2C bus needs to be set to VDD. */
-    data[0] = BIT_I2C_MST_VDDIO;
-    if (i2c_write(st.hw->addr, st.reg->yg_offs_tc, 1, data))
-        return -1;
-
-    return 0;
-}
-#endif
 
 /**
  *  @brief      Turn specific sensors on/off.
@@ -831,7 +763,7 @@ static int AP_InertialSensor_MPU9150::setup_compass(void)
 int16_t AP_InertialSensor_MPU9150::mpu_set_sensors(uint8_t sensors)
 {
     uint8_t data;
-    // uint8_t user_ctrl;
+    uint8_t user_ctrl;
 
     if (sensors & INV_XYZ_GYRO){
         data = INV_CLK_PLL;
@@ -865,36 +797,71 @@ int16_t AP_InertialSensor_MPU9150::mpu_set_sensors(uint8_t sensors)
     }
 #endif
 
-// // handle the compass, not implemented for now
-// #ifdef AK89xx_SECONDARY
-// #ifdef AK89xx_BYPASS
-//     if (sensors & INV_XYZ_COMPASS)
-//         mpu_set_bypass(1);
-//     else
-//         mpu_set_bypass(0);
-// #else
-//     if (i2c_read(st.hw->addr, st.reg->user_ctrl, 1, &user_ctrl))
-//         return -1;
-//     /* Handle AKM power management. */
-//     if (sensors & INV_XYZ_COMPASS) {
-//         data = AKM_SINGLE_MEASUREMENT;
-//         user_ctrl |= BIT_AUX_IF_EN;
-//     } else {
-//         data = AKM_POWER_DOWN;
-//         user_ctrl &= ~BIT_AUX_IF_EN;
-//     }
-//     if (st.chip_cfg.dmp_on)
-//         user_ctrl |= BIT_DMP_EN;
-//     else
-//         user_ctrl &= ~BIT_DMP_EN;
-//     if (i2c_write(st.hw->addr, st.reg->s1_do, 1, &data))
-//         return -1;
-//     /* Enable/disable I2C master mode. */
-//     if (i2c_write(st.hw->addr, st.reg->user_ctrl, 1, &user_ctrl))
-//         return -1;
-// #endif
+    // The compass will be accessed externally (bypass mode)
+    if (hal.i2c->readRegister(st.hw->addr, st.reg->user_ctrl, &user_ctrl))
+        return -1;
+    user_ctrl &= ~BIT_AUX_IF_EN;
+    user_ctrl &= ~BIT_DMP_EN;
+    // Disable I2C master mode
+    if (hal.i2c->writeRegister(st.hw->addr, st.reg->user_ctrl, user_ctrl))
+        return -1;
 
+    _sensors = sensors;
     hal.scheduler->delay(50);
+    return 0;
+}
+
+/**
+ *  @brief      Set device to bypass mode.
+ *  @param[in]  bypass_on   1 to enable bypass mode.
+ *  @return     0 if successful.
+ */
+int16_t AP_InertialSensor_MPU9150::mpu_set_bypass(uint8_t bypass_on)
+{
+    uint8_t tmp;
+
+    if (_bypass_mode == bypass_on)
+        return 0;
+
+    if (bypass_on) {
+        if (hal.i2c->readRegister(st.hw->addr, st.reg->int_status, &tmp))
+            return -1;
+        tmp &= ~BIT_AUX_IF_EN;
+        if (hal.i2c->writeRegister(st.hw->addr, st.reg->user_ctrl, tmp))
+            return -1;
+        hal.scheduler->delay(3);
+        tmp = BIT_BYPASS_EN;
+        #if 0
+        if (st.chip_cfg.active_low_int)
+            tmp |= BIT_ACTL;
+        if (st.chip_cfg.latched_int)
+            tmp |= BIT_LATCH_EN | BIT_ANY_RD_CLR;
+        #endif
+        if (hal.i2c->writeRegister(st.hw->addr, st.reg->int_pin_cfg, tmp))
+            return -1;
+    } else {
+        /* Enable I2C master mode if compass is being used. */
+        if (hal.i2c->readRegister(st.hw->addr, st.reg->user_ctrl, &tmp))
+            return -1;
+        if (_sensors & INV_XYZ_COMPASS)
+            tmp |= BIT_AUX_IF_EN;
+        else
+            tmp &= ~BIT_AUX_IF_EN;
+        if (hal.i2c->writeRegister(st.hw->addr, st.reg->user_ctrl, tmp))
+            return -1;
+        hal.scheduler->delay(3);
+        #if 0
+        if (st.chip_cfg.active_low_int)
+            tmp = BIT_ACTL;
+        else
+            tmp = 0;
+        if (st.chip_cfg.latched_int)
+            tmp |= BIT_LATCH_EN | BIT_ANY_RD_CLR;
+        #endif
+        if (hal.i2c->writeRegister(st.hw->addr, st.reg->int_pin_cfg, tmp))
+            return -1;
+    }
+    _bypass_mode = bypass_on;
     return 0;
 }
 
@@ -933,7 +900,7 @@ int16_t AP_InertialSensor_MPU9150::mpu_set_int_latched(uint8_t enable)
 #endif
 
 
-
+#if 0
 /**
  *  @brief      Get one packet from the FIFO.
  *  If @e sensors does not contain a particular sensor, disregard the data
@@ -977,7 +944,7 @@ int16_t AP_InertialSensor_MPU9150::mpu_read_fifo(int16_t *gyro, int16_t *accel, 
         /* FIFO is 50% full, better check overflow bit. */        
         hal.i2c->readRegister(st.hw->addr, st.reg->int_status, data);
         if (data[0] & BIT_FIFO_OVERFLOW) {
-            mpu_reset_fifo(sensors_aux);
+            mpu_reset_fifo();
             return -2;
         }
     }
@@ -1012,6 +979,7 @@ int16_t AP_InertialSensor_MPU9150::mpu_read_fifo(int16_t *gyro, int16_t *accel, 
     }
     return 0;
 }
+#endif
 
 /**
  *  @brief      Accumulate values from accels and gyros. 
@@ -1020,27 +988,26 @@ int16_t AP_InertialSensor_MPU9150::mpu_read_fifo(int16_t *gyro, int16_t *accel, 
  *
  */
 void AP_InertialSensor_MPU9150::_accumulate(void){
-    // get pointer to i2c bus semaphore
-    AP_HAL::Semaphore* i2c_sem = hal.i2c->get_semaphore();
 
     // take i2c bus sempahore
-    if (!i2c_sem->take_nonblocking()){
+    if (!_i2c_sem->take_nonblocking()){
         return;
     }
 
-    // Read accelerometer FIFO to find out how many samples are available
-    /* Assumes maximum packet size is gyro (6) + accel (6). */
+    // Read MPU9150 FIFO to find out how many samples are available
+    /* Assumes maximum packet size is gyro (6) + accel (6) */
     uint8_t data[12];
     uint8_t packet_size = 12;
     uint16_t fifo_count, index = 0;
     int16_t accel_x, accel_y, accel_z, gyro_x, gyro_y, gyro_z;
+    //int16_t mag_x, mag_y, mag_z;
 
-    // fifo_count_h register contains the number of samples in the FIFO
+    // fifo_count_h register contains the number of bytes in the FIFO
     hal.i2c->readRegisters(st.hw->addr, st.reg->fifo_count_h, 2, data);
     fifo_count = (data[0] << 8) | data[1];
     if (fifo_count < packet_size){
         // give back i2c semaphore
-        i2c_sem->give();
+        _i2c_sem->give();
         return;
     }
 
@@ -1049,8 +1016,8 @@ void AP_InertialSensor_MPU9150::_accumulate(void){
         /* FIFO is 50% full, better check overflow bit. */        
         hal.i2c->readRegister(st.hw->addr, st.reg->int_status, data);
         if (data[0] & BIT_FIFO_OVERFLOW) {            
-            mpu_reset_fifo(INV_XYZ_ACCEL| INV_XYZ_GYRO);
-            i2c_sem->give();
+            mpu_reset_fifo();
+            _i2c_sem->give();
             return;
         }
     }    
@@ -1078,7 +1045,17 @@ void AP_InertialSensor_MPU9150::_accumulate(void){
         if (index != packet_size) {
             gyro_z = (int16_t) (data[index+0] << 8) | data[index+1];
             index += 2;
-        }        
+        }
+
+        #if 0
+        if (index != packet_size) {
+            // Mag data is ST1, HXL, HXH, HYL, HYH, HZL, HZH, ST2
+            mag_x = (int16_t) (data[index+1] << 8) | data[index+2];
+            mag_y = (int16_t) (data[index+3] << 8) | data[index+4];
+            mag_z = (int16_t) (data[index+5] << 8) | data[index+6];
+            index += 8;
+        }
+        #endif
         // reset the index
         index = 0;
 
@@ -1096,19 +1073,19 @@ void AP_InertialSensor_MPU9150::_accumulate(void){
     }
 
     // give back i2c semaphore
-    i2c_sem->give();
+    _i2c_sem->give();
     #else
     // Read all the samples from the FIFO at once
     // BUGBUG this results in sporadically glitchy data
+    // I believe the I2C buffer may only be 32-bytes
     if (hal.i2c->readRegisters(st.hw->addr, st.reg->fifo_r_w, fifo_count, fifo_buffer)) {
         // Unable to read
-        printf("Unable to read\n");
-        i2c_sem->give();
+        _i2c_sem->give();
         return;
     }
 
     // give back i2c semaphore
-    i2c_sem->give();
+    _i2c_sem->give();
 
     for (uint16_t i=0; i< (fifo_count/packet_size); i++) {        
 
