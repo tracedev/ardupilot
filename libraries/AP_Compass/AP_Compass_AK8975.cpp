@@ -24,12 +24,26 @@
 
 #include <AP_HAL.h>
 
+// Define if using an AK8975 on the slave I2C bus of the MPU9150
+// Requires that the MPU9150 InertialSensor driver is being used
+#define MPU9150_BYPASS
+
 #include "AP_Compass_AK8975.h"
+#ifdef MPU9150_BYPASS
+#include "AP_InertialSensor_MPU9150.h"
+#endif
 #include <stdio.h>
 
 #define AK89xx_FSR (9830)
 
 extern const AP_HAL::HAL& hal;
+
+#ifdef MPU9150_BYPASS
+extern AP_InertialSensor_MPU9150 ins;
+#define AK8975_ACCESSIBLE() ins.mpu_get_bypass()
+#else
+#define AK8975_ACCESSIBLE() true
+#endif
 
 // AK8975_SECONDARY
 #define SUPPORTS_AK89xx_HIGH_SENS   (0x00)
@@ -71,6 +85,10 @@ extern const AP_HAL::HAL& hal;
 
 // Public Methods //////////////////////////////////////////////////////////////
 
+/**
+ *  @brief      Initialize the compass
+ *  @return     true regardless of device setup state
+ */
 bool AP_Compass_AK8975::init(void)
 {
     _num_instances = 1;
@@ -90,7 +108,7 @@ bool AP_Compass_AK8975::init(void)
     // We may not be able to initialize here, depending on if the INS has initialized
     // the AP_InertialSensor_MPU9150 already to set the I2C bus in bypass mode
     // Therefore, we need to retry later if we don't initialize
-    if (0 == setup_compass()) {
+    if (AK8975_ACCESSIBLE() && 0 == setup_compass()) {
         _initialized = true;
         _healthy[0] = true;
         // give the driver a chance to run, and gather one sample
@@ -100,7 +118,9 @@ bool AP_Compass_AK8975::init(void)
             hal.console->printf("Failed initial compass accumulate\n");        
         }
     } else {
-        hal.console->printf("Failed compass setup in init\n");
+#ifndef MPU9150_BYPASS
+        hal.console->printf("Deferring compass init, device not ready\n");
+#endif
     }
 
     _i2c_sem->give();
@@ -108,6 +128,10 @@ bool AP_Compass_AK8975::init(void)
     return true;
 }
 
+/**
+ *  @brief      Read accumulated data
+ *  @return     true if device is healthy
+ */
 bool AP_Compass_AK8975::read(void)
 {
     // try to accumulate one more sample, so we have the latest data
@@ -155,6 +179,11 @@ bool AP_Compass_AK8975::read(void)
     return _healthy[0];
 }
 
+/**
+ *  @brief      Obtain a reading from the AK8975
+ *              Will attempt initialization if not already
+ *              complete
+ */
 void AP_Compass_AK8975::accumulate(void)
 {
     Vector3f mag_data;
@@ -162,18 +191,21 @@ void AP_Compass_AK8975::accumulate(void)
     int16_t ret;
 
     if (!_initialized) {
-        // We may not have been able to initialize yet, try here
-        if (!_i2c_sem->take_nonblocking()) {
-            return;
-        }
-        if (0 == setup_compass()) {
-             _i2c_sem->give();
-             _healthy[0] = true;
-             hal.console->printf("Successful compass setup in accumulate\n");
-            _initialized = true;
+        if (AK8975_ACCESSIBLE()) {
+            // We may not have been able to initialize yet, try here
+            if (!_i2c_sem->take_nonblocking()) {
+                return;
+            }
+            if (0 == setup_compass()) {
+                 _i2c_sem->give();
+                 _healthy[0] = true;
+                _initialized = true;
+            } else {
+                _i2c_sem->give();
+                hal.console->printf("Failed compass setup in accumulate\n");
+                return;
+            }
         } else {
-            _i2c_sem->give();
-            hal.console->printf("Failed compass setup in accumulate\n");
             return;
         }
     }
@@ -196,7 +228,12 @@ void AP_Compass_AK8975::accumulate(void)
 
 }
 
-// The AK8975 must already be in bypass mode
+/**
+ *  @brief      Configure the AK8975
+ *              The AK8975 must already be in bypass mode for
+ *              setup to succeed
+ *  @return     0 if successful.
+ */
 int16_t AP_Compass_AK8975::setup_compass(void)
 {
     uint8_t data[4], akm_addr;
@@ -212,10 +249,7 @@ int16_t AP_Compass_AK8975::setup_compass(void)
     if (akm_addr > 0x0F) {
         // We may not be able to find the compass if the AK8975 hasn't been
         // configured in bypass mode yet
-        // TODO We should probably only try the compass setup so many times before
-        // panic sets in
-        //hal.scheduler->panic(PSTR("AP_Compass_AK8975: Compass not found.\n"));
-        hal.console->printf("AP_Compass_AK8975: Compass not found.\n", akm_addr);
+        hal.console->printf("AP_Compass_AK8975: Compass not found.\n");
         return -1;
     } else {
         hal.console->printf("Found compass at 0x%02x\n", akm_addr);

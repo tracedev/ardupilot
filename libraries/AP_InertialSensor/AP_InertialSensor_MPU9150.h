@@ -26,6 +26,8 @@ public:
     float           get_gyro_drift_rate();
     bool            wait_for_sample(uint16_t timeout_ms);
 
+    bool            mpu_get_bypass(void);
+
 private:
     uint16_t        _init_sensor( Sample_rate sample_rate );
     void             _accumulate(void);

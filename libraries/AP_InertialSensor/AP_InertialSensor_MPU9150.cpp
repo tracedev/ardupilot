@@ -865,6 +865,15 @@ int16_t AP_InertialSensor_MPU9150::mpu_set_bypass(uint8_t bypass_on)
     return 0;
 }
 
+/**
+ *  @brief      Get status of bypass mode
+ *  @return     true if in bypass, false if not in bypass.
+ */
+bool AP_InertialSensor_MPU9150::mpu_get_bypass(void)
+{
+    return _bypass_mode;
+}
+
 #if 0
 /**
  *          TODO: Remove the st.chip_cfg cache variables
