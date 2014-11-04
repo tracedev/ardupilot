@@ -125,6 +125,9 @@ bool AP_Compass_AK8975::init(void)
 
     _i2c_sem->give();
 
+    _last_accumulate_time_us = hal.scheduler->micros();
+    hal.scheduler->register_timer_process( AP_HAL_MEMBERPROC(&AP_Compass_AK8975::accumulate));
+
     return true;
 }
 
@@ -134,14 +137,17 @@ bool AP_Compass_AK8975::init(void)
  */
 bool AP_Compass_AK8975::read(void)
 {
-    // try to accumulate one more sample, so we have the latest data
-    accumulate();
 
-    // consider the compass healthy if we got a reading in the last 0.2s
-    _healthy[0] = (hal.scheduler->micros64() - _last_timestamp[0] < 200000);
+    bool _healthy_calculated = false;
+
+    // Suspend timer procs to protect variables written in accumulate()
+    hal.scheduler->suspend_timer_procs();
 
     // avoid division by zero if we haven't received any mag reports
     if (_count[0]) {
+
+        // consider the compass healthy if we got a reading in the last 0.2s
+        _healthy_calculated = (hal.scheduler->micros64() - _last_timestamp[0] < 200000);
 
         _sum[0] /= _count[0];
         _sum[0] *= 1000;
@@ -176,7 +182,8 @@ bool AP_Compass_AK8975::read(void)
         last_update = _last_timestamp[0];
     }
     
-    return _healthy[0];
+    hal.scheduler->resume_timer_procs();        
+    return _healthy_calculated;
 }
 
 /**
@@ -189,6 +196,12 @@ void AP_Compass_AK8975::accumulate(void)
     Vector3f mag_data;
     int16_t data[3];
     int16_t ret;
+
+    // This is called on a 1kHz timer
+    // Throttle rate to 100hz maximum.
+    if (hal.scheduler->micros() - _last_accumulate_time_us < 10000) {
+        return;
+    }
 
     if (!_initialized) {
         if (AK8975_ACCESSIBLE()) {
@@ -225,6 +238,8 @@ void AP_Compass_AK8975::accumulate(void)
         _count[0]++;
         _last_timestamp[0] = hal.scheduler->micros64();
     }
+
+    _last_accumulate_time_us = hal.scheduler->micros();
 
 }
 

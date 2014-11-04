@@ -993,7 +993,8 @@ int16_t AP_InertialSensor_MPU9150::mpu_read_fifo(int16_t *gyro, int16_t *accel, 
 /**
  *  @brief      Accumulate values from accels and gyros. 
  *
- *     This method is called periodically by the scheduler.
+ *     This method is called periodically (1kHz) by the timer
+ *     scheduler.
  *
  */
 void AP_InertialSensor_MPU9150::_accumulate(void){
@@ -1007,9 +1008,8 @@ void AP_InertialSensor_MPU9150::_accumulate(void){
     /* Assumes maximum packet size is gyro (6) + accel (6) */
     uint8_t data[12];
     uint8_t packet_size = 12;
-    uint16_t fifo_count, index = 0;
+    uint16_t fifo_count;
     int16_t accel_x, accel_y, accel_z, gyro_x, gyro_y, gyro_z;
-    //int16_t mag_x, mag_y, mag_z;
 
     // fifo_count_h register contains the number of bytes in the FIFO
     hal.i2c->readRegisters(st.hw->addr, st.reg->fifo_count_h, 2, data);
@@ -1036,37 +1036,13 @@ void AP_InertialSensor_MPU9150::_accumulate(void){
     for (uint16_t i=0; i< (fifo_count/packet_size); i++) {        
         // obtain an entry
         hal.i2c->readRegisters(st.hw->addr, st.reg->fifo_r_w, packet_size, data);
-        // TODO, remove all the checking since it's being configured this way.
-        if (index != packet_size) {
-            accel_x = (int16_t) (data[index+0] << 8) | data[index+1];
-            accel_y = (int16_t) (data[index+2] << 8) | data[index+3];
-            accel_z = (int16_t) (data[index+4] << 8) | data[index+5];
-            index += 6;
-        }
-        if (index != packet_size) {
-            gyro_x = (int16_t) (data[index+0] << 8) | data[index+1];
-            index += 2;
-        }
-        if (index != packet_size) {
-            gyro_y = (int16_t) (data[index+0] << 8) | data[index+1];
-            index += 2;
-        }
-        if (index != packet_size) {
-            gyro_z = (int16_t) (data[index+0] << 8) | data[index+1];
-            index += 2;
-        }
+        accel_x = (int16_t) (data[0] << 8) | data[1];
+        accel_y = (int16_t) (data[2] << 8) | data[3];
+        accel_z = (int16_t) (data[4] << 8) | data[5];
 
-        #if 0
-        if (index != packet_size) {
-            // Mag data is ST1, HXL, HXH, HYL, HYH, HZL, HZH, ST2
-            mag_x = (int16_t) (data[index+1] << 8) | data[index+2];
-            mag_y = (int16_t) (data[index+3] << 8) | data[index+4];
-            mag_z = (int16_t) (data[index+5] << 8) | data[index+6];
-            index += 8;
-        }
-        #endif
-        // reset the index
-        index = 0;
+        gyro_x = (int16_t) (data[6] << 8) | data[7];
+        gyro_y = (int16_t) (data[8] << 8) | data[9];
+        gyro_z = (int16_t) (data[10] << 8) | data[11];
 
         _accel_filtered = Vector3f(
             _accel_filter_x.apply(accel_x), 
@@ -1098,7 +1074,7 @@ void AP_InertialSensor_MPU9150::_accumulate(void){
 
     for (uint16_t i=0; i< (fifo_count/packet_size); i++) {        
 
-        index = i*packet_size;
+        uint16_t index = i*packet_size;
 
         accel_x = (int16_t) (fifo_buffer[index] << 8) | fifo_buffer[index+1];
         accel_y = (int16_t) (fifo_buffer[index+2] << 8) | fifo_buffer[index+3];
@@ -1125,7 +1101,7 @@ void AP_InertialSensor_MPU9150::_accumulate(void){
 
 bool AP_InertialSensor_MPU9150::_sample_available(void)
 {
-    uint64_t tnow =  hal.scheduler->micros64();
+    uint64_t tnow = hal.scheduler->micros64();
     while (tnow - _last_sample_timestamp > _sample_period_usec) {
         _have_sample_available = true;
         _last_sample_timestamp += _sample_period_usec;
@@ -1135,6 +1111,7 @@ bool AP_InertialSensor_MPU9150::_sample_available(void)
 
 bool AP_InertialSensor_MPU9150::wait_for_sample(uint16_t timeout_ms)
 {
+    // TODO several variables aren't protected against timer access in _sample_available()
     if (_sample_available()) {
         return true;
     }
@@ -1161,11 +1138,11 @@ bool AP_InertialSensor_MPU9150::update(void)
 
     _previous_accel[0] = _accel[0];
 
-    // hal.scheduler->suspend_timer_procs();
+    // Suspend timer procs to protect variables written in accumulate()
+    hal.scheduler->suspend_timer_procs();
     _accel[0] = _accel_filtered;
     _gyro[0] = _gyro_filtered;
-    // hal.scheduler->resume_timer_procs();
-
+ 
     // add offsets and rotation
     _accel[0].rotate(_board_orientation);
 
@@ -1194,6 +1171,7 @@ bool AP_InertialSensor_MPU9150::update(void)
     }
 
     _have_sample_available = false;
+    hal.scheduler->resume_timer_procs();
 
     return true;
 }

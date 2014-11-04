@@ -67,7 +67,7 @@ extern const AP_HAL::HAL& hal;
 // Use times instead.
 // Temp conversion time is 4.5ms
 // Pressure conversion time is 25.5ms (for OVERSAMPLING=3)
-#define BMP_DATA_READY() (BMP085_State == 0 ? hal.scheduler->millis() > (_last_temp_read_command_time + 5) : hal.scheduler->millis() > (_last_press_read_command_time + 26))
+#define BMP_DATA_READY() (BMP085_State == 0 ? hal.scheduler->millis() > (_last_temp_read_command_time_ms + 5) : hal.scheduler->millis() > (_last_press_read_command_time_ms + 26))
 #endif
 
 // oversampling 3 gives 26ms conversion time. We then average
@@ -79,10 +79,10 @@ bool AP_Baro_BMP085::init()
     uint8_t buff[22];
 
     // get pointer to i2c bus semaphore
-    AP_HAL::Semaphore* i2c_sem = hal.i2c->get_semaphore();
+    _i2c_sem = hal.i2c->get_semaphore();
 
     // take i2c bus sempahore
-    if (!i2c_sem->take(HAL_SEMAPHORE_BLOCK_FOREVER))
+    if (!_i2c_sem->take(HAL_SEMAPHORE_BLOCK_FOREVER))
         return false;
 
     hal.gpio->pinMode(BMP085_EOC, HAL_GPIO_INPUT);// End Of Conversion (PC7) input
@@ -90,7 +90,7 @@ bool AP_Baro_BMP085::init()
     // We read the calibration data registers
     if (hal.i2c->readRegisters(BMP085_ADDRESS, 0xAA, 22, buff) != 0) {
         _flags.healthy = false;
-        i2c_sem->give();
+        _i2c_sem->give();
         return false;
     }
 
@@ -106,19 +106,36 @@ bool AP_Baro_BMP085::init()
     mc = ((int16_t)buff[18] << 8) | buff[19];
     md = ((int16_t)buff[20] << 8) | buff[21];
 
-    _last_press_read_command_time = 0;
-    _last_temp_read_command_time = 0;
+    _last_press_read_command_time_ms = 0;
+    _last_temp_read_command_time_ms = 0;
 
     //Send a command to read Temp
     Command_ReadTemp();
-    
+    _i2c_sem->give();
+
     BMP085_State = 0;
 
-    // init raw temo
+    // init raw temperature
     RawTemp = 0;
 
+    // Start the timer to read pressure and temperature data
+    _last_accumulate_time_us = hal.scheduler->micros();
+    hal.scheduler->register_timer_process( AP_HAL_MEMBERPROC(&AP_Baro_BMP085::accumulate));
+
+    // wait for at least one value to be read
+    // BUGBUG _count is not protected nor guaranteed atomic
+    uint32_t tstart = hal.scheduler->millis();
+    while (0 == _count) {
+        hal.scheduler->delay(10);
+        if (hal.scheduler->millis() - tstart > 1000) {
+            hal.scheduler->panic(PSTR("PANIC: AP_Baro_BMP085 took more than "
+                        "1000ms to initialize"));
+            _flags.healthy = false;
+            return false;
+        }
+    }
+
     _flags.healthy = true;
-    i2c_sem->give();
     return true;
 }
 
@@ -126,15 +143,19 @@ bool AP_Baro_BMP085::init()
 // acumulate a new sensor reading
 void AP_Baro_BMP085::accumulate(void)
 {
-    // get pointer to i2c bus semaphore
-    AP_HAL::Semaphore* i2c_sem = hal.i2c->get_semaphore();
+
+    // This is called on a 1kHz timer
+    // Throttle rate to 100hz maximum.
+    if (hal.scheduler->micros() - _last_accumulate_time_us < 10000) {
+        return;
+    }
 
     if (!BMP_DATA_READY()) {
         return;
     }
 
     // take i2c bus sempahore
-    if (!i2c_sem->take(1))
+    if (!_i2c_sem->take(1))
         return;
 
     if (BMP085_State == 0) {
@@ -151,17 +172,17 @@ void AP_Baro_BMP085::accumulate(void)
         Command_ReadPress();
     }
 
-    i2c_sem->give();
+    _last_accumulate_time_us = hal.scheduler->micros();
+    _i2c_sem->give();
 }
-
 
 // Read the sensor using accumulated data
 uint8_t AP_Baro_BMP085::read()
 {
-    if (_count == 0 && BMP_DATA_READY()) {
-        accumulate();
-    }
+    // Suspend timer procs to protect variables written in accumulate()
+    hal.scheduler->suspend_timer_procs();
     if (_count == 0) {
+        hal.scheduler->resume_timer_procs();
         return 0;
     }
     _last_update = hal.scheduler->millis();
@@ -174,6 +195,7 @@ uint8_t AP_Baro_BMP085::read()
     _temp_sum = 0;
     _press_sum = 0;
 
+    hal.scheduler->resume_timer_procs();
     return 1;
 }
 
@@ -188,18 +210,20 @@ float AP_Baro_BMP085::get_temperature() {
 // Private functions: /////////////////////////////////////////////////////////
 
 // Send command to Read Pressure
+// Assumes bus is already locked
 void AP_Baro_BMP085::Command_ReadPress()
 {
     // Mode 0x34+(OVERSAMPLING << 6) is osrs=3 when OVERSAMPLING=3 => 25.5ms conversion time
     uint8_t res = hal.i2c->writeRegister(BMP085_ADDRESS, 0xF4,
             0x34+(OVERSAMPLING << 6));
-    _last_press_read_command_time = hal.scheduler->millis();
+    _last_press_read_command_time_ms = hal.scheduler->millis();
     if (res != 0) {
         _flags.healthy = false;
     }
 }
 
 // Read Raw Pressure values
+// Assumes bus is already locked
 void AP_Baro_BMP085::ReadPress()
 {
     uint8_t buf[3];
@@ -221,15 +245,17 @@ void AP_Baro_BMP085::ReadPress()
 }
 
 // Send Command to Read Temperature
+// Assumes bus is already locked
 void AP_Baro_BMP085::Command_ReadTemp()
 {
     if (hal.i2c->writeRegister(BMP085_ADDRESS, 0xF4, 0x2E) != 0) {
         _flags.healthy = false;
     }
-    _last_temp_read_command_time = hal.scheduler->millis();
+    _last_temp_read_command_time_ms = hal.scheduler->millis();
 }
 
 // Read Raw Temperature values
+// Assumes bus is already locked
 void AP_Baro_BMP085::ReadTemp()
 {
     uint8_t buf[2];
