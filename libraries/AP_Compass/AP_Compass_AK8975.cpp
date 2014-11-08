@@ -34,8 +34,6 @@
 #endif
 #include <stdio.h>
 
-#define AK89xx_FSR (9830)
-
 extern const AP_HAL::HAL& hal;
 
 #ifdef MPU9150_BYPASS
@@ -113,7 +111,7 @@ bool AP_Compass_AK8975::init(void)
         _healthy[0] = true;
         // give the driver a chance to run, and gather one sample
         hal.scheduler->delay(40);
-        accumulate();
+        update();
         if (_count[0] == 0) {
             hal.console->printf("Failed initial compass accumulate\n");        
         }
@@ -126,7 +124,7 @@ bool AP_Compass_AK8975::init(void)
     _i2c_sem->give();
 
     _last_accumulate_time_us = hal.scheduler->micros();
-    hal.scheduler->register_timer_process( AP_HAL_MEMBERPROC(&AP_Compass_AK8975::accumulate));
+    hal.scheduler->register_timer_process( AP_HAL_MEMBERPROC(&AP_Compass_AK8975::update));
 
     return true;
 }
@@ -140,7 +138,7 @@ bool AP_Compass_AK8975::read(void)
 
     bool _healthy_calculated = false;
 
-    // Suspend timer procs to protect variables written in accumulate()
+    // Suspend timer procs to protect variables written in update()
     hal.scheduler->suspend_timer_procs();
 
     // avoid division by zero if we haven't received any mag reports
@@ -150,7 +148,6 @@ bool AP_Compass_AK8975::read(void)
         _healthy_calculated = (hal.scheduler->micros64() - _last_timestamp[0] < 200000);
 
         _sum[0] /= _count[0];
-        _sum[0] *= 1000;
 
         // apply default board orientation for this compass type. This is
         // a noop on most boards
@@ -187,19 +184,28 @@ bool AP_Compass_AK8975::read(void)
 }
 
 /**
+ *  @brief      Accumulate function is required by base class,
+ *              but we actually service our reads on the timer
+ *              thread
+ */
+void AP_Compass_AK8975::accumulate(void)
+{
+}
+
+/**
  *  @brief      Obtain a reading from the AK8975
  *              Will attempt initialization if not already
  *              complete
  */
-void AP_Compass_AK8975::accumulate(void)
+void AP_Compass_AK8975::update(void)
 {
     Vector3f mag_data;
     int16_t data[3];
     int16_t ret;
 
     // This is called on a 1kHz timer
-    // Throttle rate to 100hz maximum.
-    if (hal.scheduler->micros() - _last_accumulate_time_us < 10000) {
+    // Throttle rate to 50hz maximum.
+    if (hal.scheduler->micros() - _last_accumulate_time_us < 20000) {
         return;
     }
 
@@ -288,6 +294,7 @@ int16_t AP_Compass_AK8975::setup_compass(void)
     _mag_sens_adj[0] = (long)data[0] + 128;
     _mag_sens_adj[1] = (long)data[1] + 128;
     _mag_sens_adj[2] = (long)data[2] + 128;
+    hal.console->printf("Mag sens adjust %d,%d,%d\n", _mag_sens_adj[0], _mag_sens_adj[1], _mag_sens_adj[2]);
 
     data[0] = AKM_POWER_DOWN;
     if (hal.i2c->writeRegister(_compass_addr, AKM_REG_CNTL, data[0]))

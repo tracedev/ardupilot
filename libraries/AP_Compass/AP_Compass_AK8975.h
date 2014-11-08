@@ -27,6 +27,7 @@ public:
 private:
     int16_t setup_compass(void);
     int16_t get_compass_reg(int16_t *data);
+    void    update(void);
 
     bool            _initialized;
 

@@ -33,7 +33,6 @@ public:
     /* AP_Baro public interface: */
     bool            init();
     uint8_t         read();
-    void 			accumulate(void);
     float           get_pressure();
     float           get_temperature();
 
@@ -62,6 +61,7 @@ private:
 
     uint32_t                        _retry_time;
 
+    void                            Update();
     void                            Command_ReadPress();
     void                            Command_ReadTemp();
     void                            ReadPress();

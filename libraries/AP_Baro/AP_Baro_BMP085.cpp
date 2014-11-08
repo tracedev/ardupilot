@@ -120,7 +120,7 @@ bool AP_Baro_BMP085::init()
 
     // Start the timer to read pressure and temperature data
     _last_accumulate_time_us = hal.scheduler->micros();
-    hal.scheduler->register_timer_process( AP_HAL_MEMBERPROC(&AP_Baro_BMP085::accumulate));
+    hal.scheduler->register_timer_process( AP_HAL_MEMBERPROC(&AP_Baro_BMP085::Update));
 
     // wait for at least one value to be read
     // BUGBUG _count is not protected nor guaranteed atomic
@@ -140,13 +140,13 @@ bool AP_Baro_BMP085::init()
 }
 
 // Read the sensor. This is a state machine
-// acumulate a new sensor reading
-void AP_Baro_BMP085::accumulate(void)
+// accumulate a new sensor reading
+void AP_Baro_BMP085::Update(void)
 {
 
     // This is called on a 1kHz timer
-    // Throttle rate to 100hz maximum.
-    if (hal.scheduler->micros() - _last_accumulate_time_us < 10000) {
+    // Throttle rate to 50hz maximum.
+    if (hal.scheduler->micros() - _last_accumulate_time_us < 20000) {
         return;
     }
 
@@ -179,7 +179,7 @@ void AP_Baro_BMP085::accumulate(void)
 // Read the sensor using accumulated data
 uint8_t AP_Baro_BMP085::read()
 {
-    // Suspend timer procs to protect variables written in accumulate()
+    // Suspend timer procs to protect variables written in Update()
     hal.scheduler->suspend_timer_procs();
     if (_count == 0) {
         hal.scheduler->resume_timer_procs();
